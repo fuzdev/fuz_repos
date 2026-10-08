@@ -1,14 +1,14 @@
 <script lang="ts">
-	import {page} from '$app/state';
-	import {resolve} from '$app/paths';
-	import {format_url} from '@fuzdev/fuz_util/url.ts';
+	import { page } from '$app/state';
+	import { resolve } from '$app/paths';
+	import { format_url } from '@fuzdev/fuz_util/url.ts';
 
-	import type {Repo} from './repo.svelte.ts';
-	import {to_pull_url} from './github_helpers.ts';
+	import type { Repo } from './repo.svelte.ts';
+	import { to_pull_url } from './github_helpers.ts';
 
 	const {
 		repos,
-		deps = ['@fuzdev/fuz_ui', '@fuzdev/gro'],
+		deps = ['@fuzdev/fuz_ui', '@fuzdev/gro']
 	}: {
 		repos: Array<Repo>;
 		deps?: Array<string>;
@@ -37,21 +37,13 @@
 		new Map<string, string | null>(
 			deps.map((dep) => {
 				const repo = repos.find((repo) => repo.package_json.name === dep);
-				if (!repo?.package_json) return [dep, null];
-				return [dep, repo.package_json.version ?? null];
-			}),
-		),
+				return [dep, repo?.package_json.version ?? null];
+			})
+		)
 	);
 
 	const format_version = (version: string | null | undefined): string =>
 		version == null ? '' : version.replace(/^(\^|>=)\s*/, '');
-
-	const lookup_pull_requests = (repos: Array<Repo> | null, repo: Repo) => {
-		const found = repos?.find((p) => p.repo_url === repo.repo_url);
-		if (!found?.package_json) return null;
-		const {pull_requests} = found;
-		return pull_requests;
-	};
 </script>
 
 <table>
@@ -70,13 +62,14 @@
 	</thead>
 	<tbody>
 		{#each repos as repo (repo.name)}
-			{@const {package_json, homepage_url} = repo}
+			{@const { package_json, homepage_url } = repo}
+			{@const check_runs = repo.check_runs}
+			{@const check_runs_completed = check_runs?.status === 'completed'}
+			{@const check_runs_success = check_runs?.conclusion === 'success'}
 			<tr>
 				<td>
 					<div class="row">
-						{#if package_json}
-							<a href={resolve(`/tree/${repo.repo_name}`)}>{package_json.glyph ?? '🌳'}</a>
-						{/if}
+						<a href={resolve(`/tree/${repo.repo_name}`)}>{package_json.glyph ?? '🌳'}</a>
 					</div>
 				</td>
 				<td>
@@ -98,25 +91,17 @@
 				</td>
 				<td>
 					<div class="row">
-						{#if package_json}
-							<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -->
-							<a href={repo.repo_url}>{repo.repo_name}</a>
-							{@const check_runs = repo.check_runs}
-							{@const check_runs_completed = check_runs?.status === 'completed'}
-							{@const check_runs_success = check_runs?.conclusion === 'success'}
-							{#if check_runs && (!check_runs_completed || !check_runs_success)}
-								<!-- eslint-disable-next-line svelte/no-navigation-without-resolve --><a
-									href="{repo.repo_url}/commits/main"
-									title={!check_runs_completed
-										? `status: ${check_runs.status}`
-										: `CI failed: ${check_runs.conclusion}`}
-									>{#if !check_runs_completed}🟡{:else}⚠️{/if}</a
-								>
-							{/if}
-						{:else}
+						<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -->
+						<a href={repo.repo_url}>{repo.repo_name}</a>
+						{#if check_runs && (!check_runs_completed || !check_runs_success)}
 							<!-- eslint-disable-next-line svelte/no-navigation-without-resolve --><a
-								href={repo.repo_url}>{format_url(repo.repo_url)}</a
+								href="{repo.repo_url}/commits/{repo.branch}"
+								title={!check_runs_completed
+									? `status: ${check_runs.status}`
+									: `CI failed: ${check_runs.conclusion}`}
 							>
+								{#if !check_runs_completed}🟡{:else}⚠️{/if}
+							</a>
 						{/if}
 					</div>
 				</td>
@@ -124,16 +109,20 @@
 					{#if repo.npm_url}
 						<div class="row">
 							<!-- eslint-disable-next-line svelte/no-navigation-without-resolve --><a
-								href={repo.npm_url}><code>{repo.name}</code></a
+								href={repo.npm_url}
 							>
+								<code>{repo.name}</code>
+							</a>
 						</div>
 					{/if}
 				</td>
 				<td>
 					{#if package_json.version !== '0.0.1'}
 						<!-- eslint-disable-next-line svelte/no-navigation-without-resolve --><a
-							href={repo.changelog_url}>{format_version(package_json.version)}</a
+							href={repo.changelog_url}
 						>
+							{format_version(package_json.version)}
+						</a>
 					{/if}
 				</td>
 				{#each deps as dep (dep)}
@@ -149,21 +138,20 @@
 					</td>
 				{/each}
 				<td>
-					{#if repo.repo_url}
-						{@const pull_requests = lookup_pull_requests(repos, repo)}
-						<!-- TODO show something like `and N more` with a link to a dialog list -->
-						<div class="row">
-							{#if pull_requests}
-								{#each pull_requests as pull (pull)}
-									<!-- eslint-disable-next-line svelte/no-navigation-without-resolve --><a
-										href={to_pull_url(repo.repo_url, pull)}
-										class="chip"
-										title={pull.title}>#{pull.number}</a
-									>
-								{/each}
-							{/if}
-						</div>
-					{/if}
+					<!-- TODO show something like `and N more` with a link to a dialog list -->
+					<div class="row">
+						{#if repo.pull_requests}
+							{#each repo.pull_requests as pull (pull.number)}
+								<!-- eslint-disable-next-line svelte/no-navigation-without-resolve --><a
+									href={to_pull_url(repo.repo_url, pull)}
+									class="chip"
+									title={pull.title}
+								>
+									#{pull.number}
+								</a>
+							{/each}
+						{/if}
+					</div>
 				</td>
 			</tr>
 		{/each}

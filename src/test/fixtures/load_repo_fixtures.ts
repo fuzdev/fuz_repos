@@ -2,11 +2,12 @@
  * Utilities for loading in-memory fixture data as LocalRepo objects.
  */
 
-import type {LibraryJson} from '@fuzdev/fuz_util/library_json.ts';
-import {Library} from '@fuzdev/fuz_ui/library.svelte.ts';
+import type { LibraryJson } from '@fuzdev/fuz_util/library_json.ts';
+import { Library } from '@fuzdev/fuz_ui/library.svelte.ts';
 
-import type {LocalRepo} from '$lib/local_repo.ts';
-import type {RepoFixtureSet, RepoFixtureData} from './repo_fixture_types.ts';
+import type { LocalRepo } from '$lib/local_repo.ts';
+import { create_mock_repos_entry } from '../test_helpers.ts';
+import type { RepoFixtureSet, RepoFixtureData } from './repo_fixture_types.ts';
 
 /**
  * Convert fixture data to LocalRepo objects that can be used with publishing functions.
@@ -19,13 +20,13 @@ export const fixture_to_local_repos = (fixture: RepoFixtureSet): Array<LocalRepo
  * Convert a single fixture repo to a LocalRepo object.
  */
 export const fixture_repo_to_local_repo = (repo_data: RepoFixtureData): LocalRepo => {
-	const {repo_name, repo_url, package_json} = repo_data;
+	const { repo_name, repo_url, package_json } = repo_data;
 
 	// Create LibraryJson (raw pair) from fixture data. Fixture `package_json` has no
 	// `repository`, so inject `repo_url` — `Library`'s ctor requires a parseable one.
 	const library_json: LibraryJson = {
-		pkg_json: {...package_json, repository: repo_url},
-		source_json: {modules: []},
+		pkg_json: { ...package_json, repository: repo_url },
+		source_json: { modules: [] }
 	};
 
 	const library = new Library(library_json);
@@ -35,15 +36,7 @@ export const fixture_repo_to_local_repo = (repo_data: RepoFixtureData): LocalRep
 		library,
 		package_json,
 		repo_dir: `/fixtures/${repo_name}`, // Fake path - not used in tests
-		repo_git_ssh_url: `git@github.com:test/${repo_name}.git`,
-		repo_config: {
-			repo_url,
-			repo_dir: null,
-			branch: 'main',
-			visibility: 'public',
-			ci: true,
-			archived: false,
-		},
+		entry: create_mock_repos_entry({ key: repo_name, url: repo_url })
 	};
 
 	// Add dependency maps if present

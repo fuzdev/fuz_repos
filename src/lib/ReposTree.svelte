@@ -1,17 +1,16 @@
 <script lang="ts">
 	import LibrarySummary from '@fuzdev/fuz_ui/LibrarySummary.svelte';
-	import {resolve} from '$app/paths';
-	import {format_url} from '@fuzdev/fuz_util/url.ts';
-	import type {Snippet} from 'svelte';
+	import { resolve } from '$app/paths';
+	import type { Snippet } from 'svelte';
 
-	import type {Repo} from './repo.svelte.ts';
+	import type { Repo } from './repo.svelte.ts';
 	import ReposTreeNav from './ReposTreeNav.svelte';
 	import LibraryDetail from '@fuzdev/fuz_ui/LibraryDetail.svelte';
 
 	const {
 		repos,
 		selected_repo,
-		nav,
+		nav
 	}: {
 		repos: Array<Repo>;
 		selected_repo?: Repo | undefined;
@@ -29,7 +28,7 @@
 				<!--
 					`links_full` points the module/declaration links at each repo's own
 					deployed docs (`homepage_url`-based) rather than this site's local
-					`/docs/api/*`, which only knows fuz_gitops's own modules — otherwise
+					`/docs/api/*`, which only knows fuz_repos's own modules — otherwise
 					the foreign links dangle.
 				-->
 				<LibraryDetail library={selected_repo.library} links_full />
@@ -39,22 +38,11 @@
 		<menu class="summaries">
 			{#each repos as repo (repo.name)}
 				<li class="panel p_md box">
-					{#if repo.package_json}
-						<LibrarySummary library={repo.library}>
-							{#snippet repo_name(repo_name)}
-								<a href={resolve(`/tree/${repo_name}`)} class="repo-name">{repo_name}</a>
-							{/snippet}
-						</LibrarySummary>
-					{:else}
-						<div class="width_atmost_sm">
-							<p>
-								failed to load library metadata for
-								<!-- eslint-disable-next-line svelte/no-navigation-without-resolve --><a
-									href={repo.repo_url}>{format_url(repo.repo_url)}</a
-								>
-							</p>
-						</div>
-					{/if}
+					<LibrarySummary library={repo.library}>
+						{#snippet repo_name(repo_name)}
+							<a href={resolve(`/tree/${repo_name}`)} class="repo-name">{repo_name}</a>
+						{/snippet}
+					</LibrarySummary>
 				</li>
 			{/each}
 		</menu>

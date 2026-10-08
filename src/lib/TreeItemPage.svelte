@@ -5,12 +5,12 @@
 	import PageFooter from './PageFooter.svelte';
 	import PageHeader from './PageHeader.svelte';
 	import ReposTree from './ReposTree.svelte';
-	import type {Repo} from './repo.svelte.ts';
+	import type { Repo } from './repo.svelte.ts';
 
 	const {
 		repo,
 		repos,
-		slug,
+		slug
 	}: {
 		repo: Repo;
 		repos: Array<Repo>;
@@ -44,9 +44,7 @@
 			{/snippet}
 		</ReposTree>
 	</section>
-	<section class="box mb_xl7">
-		<PageFooter />
-	</section>
+	<PageFooter />
 </main>
 
 <style>

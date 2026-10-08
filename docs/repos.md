@@ -1,0 +1,733 @@
+# The `repos` tool
+
+`repos` reports and converges the git state of every repo a `repos.toml`
+registry declares, and is the gateway agents push through. It lives in this
+repo as the `crates/fuz_repos` crate (a library plus the `repos` binary), a
+Cargo workspace beside the SvelteKit app; gro never invokes cargo.
+
+What it may write, what it never does, and how it divides the work with the
+TS tasks and gro: [CLAUDE.md](../CLAUDE.md#scope-and-boundaries). This doc is
+the per-command reference.
+
+## Table of Contents
+
+- [Install](#install)
+- [Commands](#commands)
+- [Finding the registry](#finding-the-registry)
+- [`repos status`](#repos-status)
+- [At rest](#at-rest)
+- [`repos status --brief`](#repos-status---brief)
+- [Fetching](#fetching)
+- [Busy detection](#busy-detection)
+- [`repos sync`](#repos-sync)
+- [`repos push`, the gateway](#repos-push-the-gateway)
+- [Third-party references](#third-party-references)
+- [Cloning missing entries](#cloning-missing-entries)
+- [Exit codes](#exit-codes)
+- [Versions](#versions)
+- [Testing](#testing)
+
+## Install
+
+```bash
+cargo install --path crates/fuz_repos --locked # install the `repos` binary
+```
+
+`rust-toolchain.toml` pins the toolchain (rustup fetches it on first build),
+and git must be 2.44 or newer (`GIT_NO_LAZY_FETCH` keeps a local `status` on
+a partial clone off the network; `git replay`, which sync's rebase runs, is
+as old). It's Unix-only, and busy detection reads
+`/proc`, so it works on Linux alone; elsewhere, with any session recorded, it
+fails closed.
+
+## Commands
+
+```bash
+repos status                 # git state of every repos.toml entry, local refs only, plus unregistered clones
+repos status gro .           # narrow to targets: a key, a dir name, or a path inside a checkout (each names its entry); a named reference previews its refresh
+repos status --verbose       # plus stash counts, unscoped sessions, each dirty worktree's own uncommitted item, and a block per entry and unregistered dir
+repos status --json          # the versioned report
+COLUMNS=80 repos status      # text wraps at COLUMNS (100 when unset or under 40); color only on a terminal without NO_COLOR
+repos status --fetch         # fetch owned entries (and references asked for) from origin first (writes remote-tracking refs), and check private repos
+repos status --references    # preview refreshing every third-party reference, as sync --references would (no targets with it)
+repos status --jobs 4 --timings # parallelism (default 16), and per-phase timings on stderr
+repos status --brief [<path>] # one line on the checkout holding the path (default: the cwd), or nothing — a SessionStart hook's nudge
+repos sync                   # fetch as status --fetch does, then fast-forward, move, rebase, push, and clone what's safe; report outcomes
+repos sync gro --json        # narrowed to targets; --json prints the versioned outcome report
+repos sync --verbose         # plus a block per entry: the state sync acted on
+repos sync --jobs 4 --timings # as under status; push takes both too
+repos sync typescript prettier # a named third-party reference is refreshed: fetched over HTTPS, then ff'd or moved where clean
+repos sync --references      # refresh every third-party reference too (never a pin); alone — with targets it's a usage error
+repos push                   # the gateway: fetch, then push the branch checked out here as a fast-forward of what was fetched, rebasing a diverged registry branch first; exit 1 unless it ends in sync
+repos push app ../wt --json  # targets: a key or dir name (the entry's own checkout), or a path (the checkout holding it); --json prints the versioned outcome report
+repos push --new-branch      # the user's (refused under CLAUDECODE): create the branch on origin when it has no upstream there, and track it as git push -u does
+repos --version              # the crate version, the commit the binary was built from, and each --json document's format version
+repos --registry <file> --root <dir> status # a registry kept outside the workspace
+
+cargo fmt --check
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace
+UPDATE_GOLDEN=1 cargo test --test golden # regenerate the --json golden fixtures in src/test/fixtures/repos_status/ (never hand-edit)
+```
+
+## Finding the registry
+
+`repos` finds its registry by walking up from the cwd (its physical path) to
+the first `repos.toml` (from a linked worktree outside the workspace, it walks
+up from the repo's main checkout instead), and the **workspace root is the
+directory holding it as found** — entry dirs resolve against that root —
+except inside a checkout (the nearest `.git` at or above it): there the root
+is the nearest directory above that checkout whose `repos.toml` is the same
+file (same device and inode, through symlinks; unreadable ones passed over).
+
+So a registry kept in one of the workspace's own repos, with a `repos.toml`
+symlink to it at the workspace root, roots the workspace at the link's dir
+from inside that repo too, and from its linked worktrees, whose own committed
+copy defers to the main checkout's. Nearest, so the innermost workspace wins:
+a stray link further out never captures it, a link inside the repo doesn't
+root it, and a different registry above neither roots nor stops the search.
+
+A root found this way that is still in a checkout whose `origin` names one of
+the registry's entries (no link at the root yet, say) is refused
+(`root_in_entry`, exit `2`) — rooted there, a sync would clone the fleet into
+that checkout. `--registry` naming a file makes _its_ directory the root as
+given, with no search or check, unless `--root <dir>` names it; `--root`
+alone skips the check too.
+
+## `repos status`
+
+`repos status` reports every registry entry's branches and their relation to
+origin, uncommitted work in each checkout (linked worktrees too), what needs a
+human, which checkouts another live Claude Code session is working in, and the
+clones at the workspace root the registry doesn't name, grouped by what to do
+next: `sync would` lists what `repos sync` would do — `push`, `ff`, `move`,
+`rebase` (a diverged registry branch: see [`repos sync`](#repos-sync)),
+`clone` — `held` what it would but for a hold, and `needs human` what it
+leaves to a person, a diverged branch it doesn't rebase among them. It reads local refs alone; `--fetch` refreshes them first (see
+[Fetching](#fetching)). Without `--fetch` it writes nothing: optional locks
+are off (`GIT_OPTIONAL_LOCKS=0`), and so is lazy fetching.
+
+How fresh the remote view is (`fetched_at`, the footer's oldest and its
+`never` count) is the newest non-empty `FETCH_HEAD` across the repo's git
+dirs; a repo with no `FETCH_HEAD` at all — a fresh clone writes none — is
+dated by git's own `clone: from` entry, the first line of its `logs/HEAD`
+(none for a clone of an empty repo, or one whose refs are in the reftable
+format, which reads as never fetched). An empty `FETCH_HEAD` means the last
+fetch failed, so its age is unknown and reads as never fetched, clone or not.
+
+In the default view each entry's `uncommitted` item totals its primary
+checkout's dirt, then names its one other dirty worktree, or folds several
+into a count with their summed dirt; `--verbose` lists every dirty checkout
+with its dirt by kind.
+
+## At rest
+
+Each entry's `at_rest` in the `--json` report says whether its own checkout
+— the primary, `checkouts[0]` — sits where the registry puts it. It's
+decided with the verdicts, so a consumer reads readiness rather than
+re-deriving it from the checkout and its branches:
+
+- `on_branch` — HEAD is on the branch the entry follows (its `branch`);
+  `false` when detached or on another branch, `null` when the entry follows
+  none (a reference declaring no `branch`)
+- `clean` — nothing staged, unstaged, untracked, or conflicted
+- `idle` — no operation in progress
+- `followed` — the followed branch's relation to origin, as its entry in
+  `branches` carries it; `null` when the entry follows no branch, has no
+  local branch of that name, or its branches aren't compared against a
+  remote — a third-party reference the run doesn't refresh, whose branches
+  with local work read `untracked` for want of a comparison
+
+`at_rest` itself is `null` exactly when `checkouts` is empty: the entry is
+missing or not a repo, or its probe failed (`probe_error`). A pin's facts are
+decided as any entry's; that it's pinned is its own field. The text
+summary's `clean · on branches · pinned` counts read `on_branch`. The gitops
+tasks read readiness from these facts: `gro gitops_publish --wetrun` refuses
+a repo not at rest (see [Publishing](publishing.md#readiness)),
+`gro gitops_sync` refuses one off its branch, dirty, or mid-operation (see
+[Troubleshooting](troubleshooting.md)), and the diagnostics list them.
+
+Readiness wants `followed` too: a followed branch that's unborn (no commit
+yet) reads `on_branch` true, clean, idle, and `followed` `null`, beside a
+`default_branch_missing` reason unless the entry is pinned. `at_rest` says nothing of live
+sessions — `checkouts[0].busy` does. And `followed` is as fresh as the
+remote-tracking refs, as `branches` is: as of `fetched_at`, and stale after
+a failed `--fetch`.
+
+A failed probe's `probe_error` is an object: its `kind` — the entry's path
+couldn't be looked up (`path_unreadable`) or isn't UTF-8
+(`non_utf8_path`); a read with a kind of its own failed, however it failed
+(`config_unreadable`, `fetch_url_unreadable`, `push_urls_unreadable`); or
+another git call couldn't start (`git_not_run`), timed out
+(`git_timed_out`), failed (`git_failed`), or printed what the probe can't
+read (`unexpected_output`) — and a `message` for display. The text output
+prints the message. A HEAD that can't be read — an unprobed worktree's, or
+an unlisted git dir's — is `null`; a readable one is `branch` or
+`detached`, as a probed checkout's is.
+
+## `repos status --brief`
+
+`repos status --brief [<path>]` is the nudge a user-scope `SessionStart` hook
+runs as `repos status --brief "$CLAUDE_PROJECT_DIR"`: its stdout lands in the
+new session's context, so it prints nothing unless the checkout holding the
+path has something that session should know, and one plain line otherwise —
+`repos: <key> — …` naming, in order:
+
+1. the other live sessions working in that checkout itself (placed there by
+   where they are or by the lock Claude Code put on it for them — not a
+   session elsewhere in the repo, which sync still counts busy in the
+   `.claude/worktrees/` checkouts, for the subagents it may have there)
+2. an operation in progress there
+3. its branch behind or diverged from its origin upstream (with how long ago
+   the repo was fetched)
+4. ahead of it (unpushed)
+
+Behind and ahead are said only for an owned entry that isn't pinned, and dirt
+never (the session sees its own working tree). It probes that entry alone,
+from local refs — no fetch, no unregistered scan, nothing written — and finds
+the registry walking up from the path (its physical path, as for the cwd)
+rather than the cwd. The caller is excluded from the sessions as anywhere
+(`CLAUDE_PID`, which Claude Code sets for its hooks too), and with busy
+detection unavailable it says nothing of sessions.
+
+It never fails its hook: no registry, a refused root, a path in no entry (the
+workspace root, an unregistered clone, outside the workspace), git missing, or
+a failed probe all exit `0` in silence; only a flag it can't take (`--json`,
+`--fetch`, `--verbose`, `--references`) or a second path is a usage error,
+exit `2`.
+
+## Fetching
+
+`status --fetch` fetches owned entries that aren't pinned (and the references a
+run refreshes) from origin before probing; `sync` and `push` run the same fetch first.
+
+**Failures.** Each failed fetch gets a kind (`ref_gone`, `unreachable`,
+`repo_not_found`, `timed_out`, …, else `failed` with git's line).
+
+**Visibility.** Each `[repos]` entry declared private gets an anonymous `git
+ls-remote` of its HTTPS URL with no credential in reach — readable means it
+leaked, printed first as `visibility`.
+
+**Confinement.** The fetch writes remote-tracking refs, the objects behind
+them, `FETCH_HEAD`, and a shallow boundary, and nothing else — never a tag, a
+submodule, or a commit-graph — whatever the repo's config says; an entry
+whose refspecs could write outside `refs/remotes/origin/`, or another
+remote's into it, isn't fetched, and
+neither is an owned one whose fetch wouldn't reach the registry's repo as git
+resolves origin's URL, `insteadOf` applied: the fetch would bring in another
+repo's history. An origin set to another URL says so on its origin-drift
+line; one set to the registry's that a rewrite sends elsewhere is a
+needs-human `fetch_url_mismatch` naming the rewrite; and one spelled otherwise
+that a rewrite sends to the registry's repo (an alias, `gh:me/app`) is
+fetched, its drift still holding the rest.
+
+**URLs.** Origin URLs are redacted wherever shown, and registry URLs are
+strict (a plain DNS host, no userinfo or port). An origin or push URL names
+the registry's repo only when read as git connects for it: the host (to the
+first `/` after `scheme://`, or the first `:` in scp-like `user@host:path`) is
+the registry's, with no port, and the path on it is `<account>/<name>`, case
+folded, a `.git` or trailing `/` dropped — an `@` past the host, an escape
+(git decodes those first), a bracket anywhere (git unwraps one into the host),
+a user other than ASCII letters, digits, and `._+-`, or an IP literal never
+matches.
+
+The details live in the rustdoc of `remote.rs`, `probe.rs`, and `url.rs`.
+
+## Busy detection
+
+**What it reads.** Busy detection reads the live Claude Code sessions under
+`$CLAUDE_CONFIG_DIR` and `~/.claude` — `sessions/<pid>.json` and the daemon
+roster's workers, each verified against `/proc/<pid>/stat`'s start time —
+excluding the caller (`CLAUDE_PID`, honored only when it's an ancestor of the
+process).
+
+**Where a session works.** A session works at its recorded cwd (Claude Code's
+`originalCwd`, which entering or exiting a worktree rewrites), a roster
+worker's `worktreePath`, and its process's current cwd (`/proc/<pid>/cwd`).
+It marks busy:
+
+- the checkout each of those sits in
+- the checkout whose git dir the nearest `.git` above it names (so a worktree
+  moved or copied by hand is busy wherever its files are)
+- every checkout under the repo's main checkout's `.claude/worktrees/`
+  (Claude Code's subagent worktrees, whose sessions keep the parent's cwd;
+  for a bare or `--separate-git-dir` repo, the common dir's too, and for a
+  moved worktree, its own)
+- every checkout whose lock names it — Claude Code locks each worktree it
+  creates with the reason `claude <agent|session> <name> (pid <pid> start
+  <start>)`, matched against the session's pid and start time
+
+A busy checkout holds every action on its branches, pushes included.
+
+**What it can't see.** Claude Code roots agent worktrees at its tracked cwd,
+which the Bash tool's `cd` moves without moving the process or the session
+file, so such a worktree is caught by its lock alone; one Claude Code doesn't
+lock (a `WorktreeCreate` hook's, another tool's), and work through `GIT_DIR`
+or `git -C`, are placed by those paths alone. A Claude process that writes no
+session file (an agent-team teammate, a session started inside another's
+environment) or runs under a `CLAUDE_CONFIG_DIR` the tool doesn't read is
+invisible, its locks with it, and a change to Claude Code's lock format
+silently drops the lock signal.
+
+**It fails closed.** A live session it can't vouch for (a file that won't
+parse, another machine's or pid namespace's, no `/proc`, a path it can't
+resolve), a file or dir it can't read, a relative `CLAUDE_CONFIG_DIR` or
+`HOME`, or `HOME` unset makes detection unavailable, which holds every action
+and prints on the `failed` line. A checkout whose path can't be resolved may
+be busy: it holds the branches checked out there and shows as a `needs_human`
+reason. So does a git dir no worktree list names that shares the repo's refs
+(a hand-made `commondir`, or `git-new-workdir`) with a session in it, and a
+branch git says is checked out in a worktree the probe didn't find. Sessions
+in no checkout show only under `--verbose` and in the JSON.
+
+The details live in the rustdoc of `sessions.rs` (the reader) and `busy.rs`
+(the scoping).
+
+## `repos sync`
+
+`repos sync` is `status --fetch` followed by acting on each branch's verdict.
+Beyond the fetch, it writes the branch it acts on, the checkout that branch is
+on, the commit objects a rebase replays, the remote branch a push moves (and
+its remote-tracking ref), and new clones.
+
+**Fast-forwards and moves.** A branch behind is fast-forwarded — in place when
+no checkout has it (a confined `git fetch .` of the exact upstream commit, so
+git refuses a non-ff and a branch checked out anywhere), in its checkout with
+`merge --ff-only --no-overwrite-ignore` only when that checkout is still on it
+and clean — and a shallow branch with no local commits moves to the fetched
+tip (`update-ref` compare-and-swap in place, `switch -C --no-overwrite-ignore`
+in a clean checkout).
+
+**Re-checks.** The live sessions are read after the fetch and again right
+before each action, and each action re-checks what it relies on (and checks
+after the fact what git can't refuse); git refusing is `failed`, exit `1` (as
+is a failed probe, or a fetch that failed or that the tool refused to run). A
+fast-forward in a checkout moves whatever branch HEAD is on when git runs, so
+a branch switched in the instant after sync read the checkout may move forward
+instead; the action then fails, naming it.
+
+**Pushes.** A branch ahead is pushed to its upstream's branch on the
+registry's repo — `git send-pack` of the commit classified straight to the
+registry's SSH URL, never through `origin`, so no `insteadOf`,
+`pushInsteadOf`, or `remote.<url>` config written in the meantime can redirect
+it; under a lease on the fetched tip (`--force-with-lease=<ref>:<fetched>`),
+no tags or push options, SSH only — once the branch still reads as
+classified, origin's push URL (`git remote get-url --push --all`, `pushurl`
+and `pushInsteadOf` applied) is exactly the registry's repo over SSH, and the
+fetched tip is still an ancestor of the commit, the same count behind it.
+
+The lease is a compare-and-swap, never a force over unseen work: git refuses
+unless the remote's branch is exactly what the fetch saw, and the ancestor
+check keeps the push a fast-forward. Any other push URL holds its pushes as a
+`needs_human` reason, and an upstream at `origin/HEAD` (or outside
+`refs/heads/`) is left to a person. A remote branch moved or deleted since the
+fetch fails the lease (`held`, rerun — a deleted one then reads gone, so no
+push recreates it but the user's `repos push --new-branch`, and only while it
+has commits on no remote); the remote's own refusal or an unreachable host is
+`push_failed`, exit `1`. After a push (or finding the commit already there,
+another hand's push since the fetch) the remote-tracking ref moves to the
+commit by compare-and-swap on the fetched tip, so `status` reads the branch in
+sync without a refetch. That write is best effort: a ref a fetch moved in the
+meantime stands, and one git can't write (a stale lock) leaves the outcome as
+it is and the branch reading ahead until a fetch can write it.
+
+**Rebases.** A registry branch diverged from origin's — local-only commits
+here, new commits there, as when two machines commit to the same `main` — is
+rebased, then pushed as any branch ahead is. `status` shows it under `sync
+would` as `rebase <key> +<ahead> −<behind>`.
+
+Only the branch the registry names, in an owned entry that's neither archived
+nor pinned, whose upstream is origin's branch of the same name, outside a
+partial clone, whose commits ahead are on no remote-tracking ref, with no
+merge commit among them and no tag on one. Any other diverged branch stays
+`needs human`, by why:
+
+- `diverged` — not the registry's branch, or its entry (archived, pinned,
+  third-party), its upstream (another name on origin), or a partial clone
+  rules it out: a diverged feature branch is as likely a local rebase
+  waiting on a force-push, which the tool never makes
+- `diverged_published` — a commit it's ahead by is on another remote branch
+  (a pushed `feat`, merged into `main` here by fast-forward): a rebase would
+  rewrite a commit a remote holds
+- `diverged_merge` — a merge commit among its local-only commits, which a
+  replay doesn't carry
+- `diverged_tagged` — a tag on one of them (a release whose push was refused,
+  say), which a rebase would leave on a commit the branch no longer holds
+
+A rebase is held by whatever holds a fast-forward (a dirty checkout —
+untracked files count — an unprobed worktree, a live session, an operation in
+progress, a failed fetch) and by whatever holds a push (origin's push URL
+elsewhere).
+
+The rebase is `git replay --onto <fetched tip> <fetched tip>..<branch>`, a
+merge made in memory: it writes new commit objects — the same changes,
+messages, authors, and author dates, committed by whoever runs the tool
+(unsigned: a replay signs nothing, whatever `commit.gpgSign` says) — and no
+ref, index, or working tree, and runs no hook. The committer is the identity
+you configured: with no `user.name` and `user.email` (in config or the
+environment), the rebase fails, saying to set them, rather than commit as the
+login and host name git would guess.
+
+So a conflict moves nothing and leaves no rebase in progress: nothing is ever
+resolved — no merge strategy option, `rerere` off, and no merge driver, the
+ones your config defines and git's built-in `union` alike, so a path a
+`merge=` attribute would have merged conflicts like any other — and the branch
+stays `needs human`, reading `diverged +n −m, rebase conflicts`. A local
+commit whose change origin already has stops it the same way (`<commit> is
+already upstream`): a replay would keep it as an empty commit where `git
+rebase` drops it, and the tool makes neither choice. Only commits on no remote
+are replayed, so nothing published is rewritten.
+
+Then the branch moves to the replayed commits: in place by `update-ref`
+compare-and-swap on the commit replayed, or in its clean checkout by the
+shallow move's `switch -C --no-overwrite-ignore`, after the checkout and the
+branch are read again — git refuses an ignored file the upstream now tracks
+(`failed`, nothing moved). The old commits stay in the branch's reflog,
+written whatever `core.logAllRefUpdates` says. Then the push, with its own
+re-checks and lease: a fast-forward of linear history, never a force. When the
+push is held or fails (origin moved again since the fetch, a ruleset refused
+it), the branch stays rebased and ahead, and the next run pushes it, or
+rebases it again.
+
+`status` predicts a rebase from the facts alone and never runs a replay (it
+writes nothing), so `sync would rebase` means sync would try.
+
+**An agent's sync pushes and rebases as a person's does**: under `CLAUDECODE`
+(Claude Code's agent shells) nothing is held for being an agent's — every
+branch ahead or diverged that nothing else holds is pushed or rebased, commits
+other, finished sessions made included — and busy detection keeps it off the
+checkouts live sessions work in.
+
+**What it leaves.** A branch that's a symbolic ref never acts. It never
+resolves a conflict, rewrites a commit a remote holds, merges anything but a
+fast-forward, deletes a branch, or prunes a worktree (the fetch prunes only
+remote-tracking refs gone upstream), and never touches a pin. A branch whose
+upstream is gone reads as cleanup, to delete by hand, except the branch the
+entry follows: its upstream gone (the remote's default renamed, say) needs a
+person. A failed fetch holds that entry's moves, rebases, and pushes (its
+remote-tracking refs weren't refreshed), and a branch on HEAD in several
+checkouts holds its fast-forward, move, or rebase.
+
+**Sync outcomes.** Exit `0` when the run acted or held as its report says;
+`1` when something failed — a fetch, a probe, an action git refused, or a push
+that failed at the remote, a rebased branch's included. A hold is no failure,
+and neither is a rebase its replay stopped (a conflict, a commit already
+upstream): the branch is a person's, as any diverged branch left alone.
+`--json` prints the entries after the fetch — the state sync acted on, not
+the state it left: a branch `rebased`, `pushed`, or `fast_forwarded` still
+reads `diverged`, `ahead`, or `behind` there — and each branch's outcome; a
+rebase is `rebased` (`from`, `to`, `onto` the fetched tip, and `push`:
+`pushed`, `already_there`, `held`, `push_failed`, or `failed`) or
+`rebase_refused` (`why`: `conflicts`, or `already_upstream` with the
+`commit`).
+
+The rustdoc of `sync.rs` has the details.
+
+## `repos push`, the gateway
+
+`repos push` is what an agent runs instead of `git push`.
+
+**Targets.** Without targets it pushes the branch checked out in the checkout
+holding the cwd; a target is a registry key or dir name (the entry's own
+checkout) or a path (the checkout holding it, a linked worktree's own).
+
+**Pipeline.** For those entries alone it runs what sync runs before acting —
+the same fetch, a re-probe, the live sessions read (the caller's own
+excluded), classification — then acts on each checked-out branch's verdict
+alone, when it's a push or a rebase: a branch ahead through sync's own push
+(the lease, the direct URL, the compare-and-swap, every re-check right
+before), a diverged one through sync's own rebase and then that push. It
+never fast-forwards, moves a shallow branch, clones, or touches a branch
+other than the one checked out at a target: a branch behind is reported for
+`repos sync` to fast-forward.
+
+**A diverged branch is rebased, then pushed**, when it's one [sync
+rebases](#repos-sync) — the same branches, by the same rules. It's the same
+action, with the same guards and re-checks: the local-only commits are
+replayed onto the fetched tip, the branch and the target's checkout move to
+the replayed commits (`switch -C --no-overwrite-ignore`, in the target's own
+checkout — a linked worktree's too), and the new tip is pushed under the
+lease. Any other diverged branch reads `needs human`, by the same reasons
+(`diverged`, `diverged_published`, `diverged_merge`, `diverged_tagged`), and a
+conflict — or a local commit whose change origin already has — stops the
+rebase with nothing moved. A rebase is all `repos push` ever writes locally
+beyond its fetch and the remote-tracking ref a push records: the commit
+objects the replay makes, that one branch, and the checkout it's on.
+
+A rebase changes what the caller knew: the branch's commits are new ones, so
+commit ids read before the push are stale, and whatever was checked before it
+(tests, a build) was checked on the old base. The report says what moved —
+the text's `rebased` line says how many upstream commits the branch now sits
+on, its new tip, and the tip replaced; the JSON's `rebased` outcome carries
+`from`, `to`, and `onto` — and when the push that follows is held or fails
+(origin moved again since the fetch, a ruleset refused it), the branch stays
+rebased and ahead, and the next `repos push` pushes it, or rebases it again.
+
+**Dirt matters only when the push must rebase.** A branch ahead pushes from a
+dirty checkout, since a push moves refs alone. A diverged one is held
+(`dirty_checkout`) by any uncommitted change in its checkout — staged,
+unstaged, or untracked, the same reading of clean sync's rebase uses — with
+nothing moved: commit, or `git stash -u`, then `repos push` again. A branch
+checked out in several checkouts is held too (`several_checkouts`).
+
+**Policy.** The policy is structural: owned entries only (a third-party
+reference or a pin named is a usage error), never a force or a tag; another
+live session in the checkout holds the push (`busy`), and so does origin
+drift; a failed fetch or an entry-level reason (origin drift among them)
+holds even a branch that reads in sync, since its refs may not be origin's (a
+branch with no upstream configured reads `no_upstream` whatever the fetch,
+since that's its config). Whatever holds a push holds the rebase before it.
+It runs for an agent as for a person, the rebase included.
+
+### `--new-branch`
+
+A branch with no upstream on origin reads `no_upstream`: **creating the
+remote branch is the user's**, with `repos push --new-branch`, which an
+agent's shell (`CLAUDECODE`) is refused, exit `2`.
+
+It creates a branch with no upstream configured, or whose same-named upstream
+on origin is gone while it has commits on no remote (with none — merged, say
+— `no_upstream`, recreated by hand only; never the branch the entry follows,
+whose upstream gone is the remote's default renamed or deleted:
+`no_upstream`, repointed by hand), as `refs/heads/<b>` on the registry's repo
+— the same send-pack, under a lease that no such ref exists
+(`--force-with-lease=<ref>:`), so one created there since the fetch is held,
+never overwritten — then, as `git push -u`, the remote-tracking ref by
+compare-and-swap on none and `branch.<b>.remote`/`.merge`, and reads
+`created`.
+
+A branch with a live upstream pushes as without the flag; one tracking
+another remote, or origin's branch under another name, stays `no_upstream`;
+one origin already has at another commit reads `remote_branch_exists` (never
+adopted: set the upstream by hand), and one the fetch refspec leaves out
+`needs_human` (`unmapped`). A run stopped between creating the branch and
+setting its upstream is finished by the next `--new-branch`: the branch is on
+origin at the very commit, the lease reads it up to date, and the upstream is
+set.
+
+### Push outcomes
+
+Exit `0` when every target's branch ends in sync with its upstream (pushed,
+rebased and pushed, created, or already there), `1` when any didn't (held,
+behind, diverged and left to a person, a rebase its replay stopped, a rebased
+branch whose push was held or failed, detached, no upstream, a remote branch
+in the way, a checkout not read, a failed fetch or push), as `git push` exits
+on a rejected ref, and `2` for usage (an unknown target, the cwd in no
+entry's checkout, a third-party or pinned target, `--new-branch` in an
+agent's shell). So a rebase a conflict stopped exits `1` here, where
+`repos sync` exits `0` on the same: sync reports a branch left to a person,
+and a push reports a branch that wasn't pushed.
+
+`--json` prints its own
+versioned outcome report: the targets' entries after the fetch — the state
+the push acted on, not the state it left: a branch `rebased` or `pushed`
+still reads `diverged` or `ahead` there — and one outcome per target
+checkout. A rebase is `rebased` (`from`, the tip replaced;
+`to`, the new tip; `onto`, the fetched tip; and `push`: `pushed`,
+`already_there`, `held`, `push_failed`, or `failed`) or `rebase_refused`
+(`why`: `conflicts`, or `already_upstream` with the `commit`), as in sync's
+report; the commits replayed and the upstream commits under them are the
+branch's `diverged` relation in the entry (`ahead`, `behind`). A `no_upstream` outcome carries `why`, what
+`--new-branch` would do with the branch, read as that flag reads it:
+`creatable` (only without the flag, which creates it), `merged`,
+`default_gone`, or `other_upstream`. The hint the text prints after it words
+that reading. A branch the flag would create in an archived repo reads
+`needs_human` (`archived_ahead`) with or without it.
+
+The rustdoc of `push.rs` has the details.
+
+### Agents push through `repos push`
+
+The recommended Claude Code settings deny raw `git push` (a `Bash(git push:*)`
+prefix rule, with `Bash(repos push --new-branch:*)` beside it) and allow
+`Bash(repos:*)`, and agents are instructed to push with `repos push`.
+Permission rules hold in every permission mode but match a command's prefix
+alone, so a push spelled another way slips past them: guidance, not a
+boundary — the host's own rules are the floor.
+
+An agent's `repos push` may rebase its branch: when the registry's branch
+diverged (another machine, or another session, pushed to it meanwhile) and
+the checkout is clean, the push replays the agent's commits onto origin's and
+moves the checkout to them before pushing. The report's `rebased` line is the
+agent's cue that the commit ids it reported earlier are stale and that its
+checks ran on the old base. A dirty checkout holds it instead, exit `1`,
+saying to commit or `git stash -u` and push again.
+
+## Third-party references
+
+**Third-party references are like locked dependencies**: left as they are —
+never fetched, no branch compared against a remote, only local work reported
+— unless the run names them as targets (a path inside a checkout names its
+entry) or passes `--references`, which takes no targets (with them it's a
+usage error, exit `2`).
+
+**Refresh.** Then each is refreshed (its `refresh` verdict `act`): fetched
+from origin over HTTPS alone, with the same confined fetch, and each branch
+fast-forwarded, or moved when shallow, as an owned one would be where clean;
+never pushed, so a branch ahead is local-only work, and one diverged or
+shallow with local commits is left to a person. `status` takes the same
+targets and `--references` to preview a refresh from local refs, and fetches
+it under `--fetch`.
+
+**What holds a refresh.** A pin is never fetched; named, it's refused
+(`refresh` held `pinned`), and `--references` passes it over. A reference
+whose `origin` isn't the registry's repo (a fork, or no URL) is never fetched:
+its refresh is held (`refresh held (origin drift)`, held by `entry`) and its
+origin-drift line says the fix. A refresh also needs an HTTPS origin naming
+the registry's repo, as git resolves it (`insteadOf` applied): the same repo
+over SSH, `http://`, or `git://`, or a rewrite of it, holds the refresh
+(`refresh held (origin not HTTPS)`, held by `origin_not_https`), never
+fetched, with a needs-human line saying the `set-url` fix or naming the
+rewrite.
+
+**Partial clones.** A partial clone (a `sparse` reference, cloned
+`--filter=blob:none`) lacks the blobs a new tip's checkout needs: a
+fast-forward or move in its checkout fetches them on demand from origin
+alone, writing objects and no ref, over the one transport origin's URL
+names as git resolves it (`insteadOf` applied; SSH or HTTPS, whoever owns
+the repo — an owned partial clone resolving to neither is a needs-human
+`fetch_url_mismatch`), and only when no other remote is a promisor — both
+read again right before, and the action held (`changed`) if origin no longer names the registry's repo over
+that transport or another promisor appeared; every other call keeps lazy
+fetching off.
+
+## Cloning missing entries
+
+**Each missing entry is cloned** — agents' runs included, and whether or not
+busy detection can vouch for every session, since a clone only creates a
+dir.
+
+**The recipe.** Owned entries clone over SSH, third-party ones over HTTPS,
+each allowed that transport alone; on the entry's `branch` (`--branch`, else
+the remote's default), `--depth 1` when `shallow`, cone-mode `sparse` with
+`--filter=blob:none`, with `--no-tags` and no submodules or hooks — the
+`tagOpt` that records is then unset, so the user's own `git fetch` there
+follows tags as in any clone. A `sparse` path is checked at parse: plain
+relative directory names, no globs.
+
+**Placement.** The clone is made in a temp dir beside the entry's
+(`.<dir>.repos-clone-<pid>-<nonce>`, the nonce random per process, so runs in
+separate pid namespaces never share one) and moved into place only when
+whole, claiming the path so nothing there is ever cloned over; a failure or
+timeout deletes the temp dir, and the unregistered scan names any it finds as
+an unfinished clone — one a killed run left, or one still running, to remove
+once no `repos sync` is.
+
+**What holds a clone.** Anything at the path — a file, an empty dir, a
+dangling symlink — reads as not a repo, never missing; a live session at or
+under the path, or another entry's gone worktree recorded there, holds the
+clone, and an entry whose `url` another entry shares is never cloned (its dir
+may have been a worktree of that repo) — a `needs_human` reason, as is a
+missing entry whose repo an unregistered dir at the root already clones (its
+origin names it, or a rename of it differing only in case and `-` against
+`_`: likely the entry's checkout under another name). The unregistered scan
+runs for that whenever the run includes a missing entry, named or not, before
+anything is cloned, in `sync` as in `status` (a run with targets doesn't
+report what it found); a clone whose origin names the repo by an unrelated
+old name isn't caught.
+
+**Read back.** The clone is read back in place (on its branch, tracking
+origin's, clean) and reported `cloned`, or `clone_failed` (classified as a
+fetch failure is) or `failed`, exit `1`.
+
+The rustdoc of `clone.rs` has the recipe.
+
+## Exit codes
+
+- `0` when the command ran — what the report says is data, not failure
+- `1` for a runtime failure: under `sync`, anything that failed (a fetch, git's
+  failure or the tool's refusal to run one whose refspec it can't confine; a
+  probe; an action git refused — a rebase a conflict stopped is not one, see
+  [Sync outcomes](#repos-sync)); under `push`, any target whose branch didn't
+  end in sync with its upstream — a rebase held, or stopped by a conflict,
+  among them ([Push outcomes](#push-outcomes)); or, under any command, a
+  fatal I/O error
+- `2` when the caller must change something — usage, a missing or invalid
+  registry, git missing or too old, an unknown target, a refused root
+  (`root_in_entry`), and `push`'s usage cases
+
+A fatal error prints `error: …` and `hint: …` on stderr; under `--json` it
+also prints one error document on stdout, in place of the report — except a usage
+error caught before the command runs (an argument the parser rejects, one that
+isn't UTF-8, a flag `--brief` can't take), which prints text alone.
+
+## Versions
+
+`repos --version` prints one line: the crate version, the commit the binary
+was built from, and the version of each `--json` document it prints —
+
+```
+repos <crate> (<commit>[, dirty]) · formats: status <n>, sync <n>, push <n>
+```
+
+Each document carries its own as `version` (`sync` and `push` embed a status
+report, which carries the status one). A version is bumped on any change to
+its document's shape, new fields and variants included, since consumers
+parse with strict objects and closed unions; an absent value is `null`, never
+an omitted key; the sync and push versions move
+with every status bump. The crate version doesn't track the formats, so a
+consumer checks the one it parses.
+
+## Testing
+
+`cargo test --workspace` runs integration tests over hermetic fixture
+workspaces (`crates/fuz_repos/tests/support`): real repos in a tempdir, each
+cloned from a local bare remote, with git's environment cleared (no global or
+system config, fixed identities and dates) and no network:
+
+- the `ssh` on `PATH` is the fixture's own, serving fetches and pushes to the
+  registry's SSH URLs from the local bare remotes and refusing anything else,
+  and SSH failures come from fakes too
+- `GIT_EXEC_PATH` is the fixture's — git's own programs, but a
+  `git-remote-https` that refuses every URL unless a test serves the bare
+  remotes through it (`serve_https`)
+- the visibility check reads `file://` repos and a loopback HTTP server
+- busy detection reads fixture config dirs whose session files name the
+  tests' own child processes
+
+The test files split by command and aspect: `status_*.rs`, `sync.rs` and
+`sync_*.rs` (`sync_rebase*.rs` the rebase: its outcomes, its races, and
+what the replay writes and refuses), `push_*.rs` (`push_rebase*.rs` a
+push's rebase), `cli_*.rs` (the binary's documents, text, and exit
+codes), `targets.rs`, `registry_real.rs`, and `golden.rs` with its
+`golden/` modules. Helpers a family shares sit beside `support/mod.rs` in
+`support/` (`busy`, `cli`, `push`, `rebase`, `remote`, `sync`,
+`unregistered`, `worktrees`).
+
+The tests need git 2.44 or newer on `PATH`, and Linux (`/proc`,
+`/etc/machine-id`). CI runs these fmt, clippy, and test commands (with
+`--locked`, and `--no-fail-fast` on tests) in the `rust` job of
+`.github/workflows/check.yml`, beside the gro check.
+
+`src/test/fixtures/repos_status/*.json` are the `repos status --json`,
+`repos sync --json`, and `repos push --json` golden documents (report,
+narrowed report, busy-detection states, sync report, push report, error
+documents), written by `crates/fuz_repos/tests/golden.rs` as the contract TS consumers parse
+against — regenerate them with `UPDATE_GOLDEN=1 cargo test --test golden`,
+never by hand. Each error `repos status --json` can print has its own
+document, `error_report_<kind>.json`; `sync_error_report.json` and
+`push_error_report.json` show the same document shape at those commands'
+versions. The status documents' TS mirror, `src/lib/repos_status.ts`, is
+checked by parsing every status golden with its strict schemas
+(`src/test/repos_status.golden.test.ts`); the sync and push documents have
+no TS consumer yet.
+
+The goldens hold to these checks. Every report they build is checked for its
+structure (`crates/fuz_repos/tests/golden/invariants.rs`): keys and dirs
+unique, nothing read of an entry with no repo or a failed probe, the
+primary checkout first, an unasked reference's branches its local work
+alone, one default-branch reason at most, no session placed while busy
+detection is unavailable, relations that fit the clone's depth, and no
+fetch time beside a fetch that failed and emptied `FETCH_HEAD`. They re-derive none of
+`classify`'s decisions: the integration tests over real git pin those. And
+together the goldens cover every variant
+(`crates/fuz_repos/tests/golden/coverage.rs`): the status documents —
+both reports, `sessions.json`, and the status error documents — carry every
+variant of every closed enum the status report and its error document
+hold, in each place it can appear (each action's holds — a branch's, a
+refresh's, a clone's — their own enum), the sync and push documents
+every outcome of theirs and every way a rebase's push and its replay's
+refusal can go, and the sync document every hold sync can report. Each enum's
+variants are listed once, a list an exhaustive
+`match` checks, and the floor counts that list: a new variant fails to
+compile until it's listed, and fails the floor until a golden covers it.

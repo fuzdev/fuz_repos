@@ -1,15 +1,13 @@
-import type {Logger} from '@fuzdev/fuz_util/log.ts';
-import {styleText as st} from 'node:util';
+import type { Logger } from '@fuzdev/fuz_util/log.ts';
+import { styleText as st } from 'node:util';
 
-import type {DependencyGraphBuilder} from './dependency_graph.ts';
+import type { DependencyAnalysis } from './dependency_graph.ts';
 
 /**
  * Formats wildcard dependencies as styled strings.
  * Returns array of lines for inclusion in output.
  */
-export const format_wildcard_dependencies = (
-	analysis: ReturnType<DependencyGraphBuilder['analyze']>,
-): Array<string> => {
+export const format_wildcard_dependencies = (analysis: DependencyAnalysis): Array<string> => {
 	if (analysis.wildcard_deps.length === 0) return [];
 
 	const lines: Array<string> = [];
@@ -17,7 +15,7 @@ export const format_wildcard_dependencies = (
 	// a leading `\n` in the header would leave the header line unprefixed.
 	lines.push('');
 	lines.push(st('yellow', `⚠️  Found ${analysis.wildcard_deps.length} wildcard dependencies:`));
-	for (const {pkg, dep, version} of analysis.wildcard_deps) {
+	for (const { pkg, dep, version } of analysis.wildcard_deps) {
 		lines.push(`  ${pkg} → ${dep} ${st('red', version)}`);
 	}
 	return lines;
@@ -27,9 +25,7 @@ export const format_wildcard_dependencies = (
  * Formats dev circular dependencies as styled strings.
  * Returns array of lines for inclusion in output.
  */
-export const format_dev_cycles = (
-	analysis: ReturnType<DependencyGraphBuilder['analyze']>,
-): Array<string> => {
+export const format_dev_cycles = (analysis: DependencyAnalysis): Array<string> => {
 	if (analysis.dev_cycles.length === 0) return [];
 
 	const lines: Array<string> = [];
@@ -37,8 +33,8 @@ export const format_dev_cycles = (
 	lines.push(
 		st(
 			'dim',
-			`ℹ️  Found ${analysis.dev_cycles.length} dev circular dependencies (normal, non-blocking):`,
-		),
+			`ℹ️  Found ${analysis.dev_cycles.length} dev circular dependencies (normal, non-blocking):`
+		)
 	);
 	for (const cycle of analysis.dev_cycles) {
 		lines.push(st('dim', `  ${cycle.join(' → ')}`));
@@ -50,9 +46,7 @@ export const format_dev_cycles = (
  * Formats production/peer circular dependencies as styled strings.
  * Returns array of lines for inclusion in output.
  */
-export const format_production_cycles = (
-	analysis: ReturnType<DependencyGraphBuilder['analyze']>,
-): Array<string> => {
+export const format_production_cycles = (analysis: DependencyAnalysis): Array<string> => {
 	if (analysis.production_cycles.length === 0) return [];
 
 	const lines: Array<string> = [];
@@ -60,8 +54,8 @@ export const format_production_cycles = (
 	lines.push(
 		st(
 			'red',
-			`❌ Found ${analysis.production_cycles.length} production/peer circular dependencies (blocks publishing):`,
-		),
+			`❌ Found ${analysis.production_cycles.length} production/peer circular dependencies (blocks publishing):`
+		)
 	);
 	for (const cycle of analysis.production_cycles) {
 		lines.push(`  ${st('red', cycle.join(' → '))}`);
@@ -74,9 +68,9 @@ export const format_production_cycles = (
  * Wildcard dependencies require attention and should be reviewed.
  */
 export const log_wildcard_dependencies = (
-	analysis: ReturnType<DependencyGraphBuilder['analyze']>,
+	analysis: DependencyAnalysis,
 	log: Logger,
-	indent = '',
+	indent = ''
 ): void => {
 	const lines = format_wildcard_dependencies(analysis);
 	for (const line of lines) {
@@ -88,11 +82,7 @@ export const log_wildcard_dependencies = (
  * Logs dev circular dependencies as info.
  * Dev cycles are normal and non-blocking, so they're informational, not warnings.
  */
-export const log_dev_cycles = (
-	analysis: ReturnType<DependencyGraphBuilder['analyze']>,
-	log: Logger,
-	indent = '',
-): void => {
+export const log_dev_cycles = (analysis: DependencyAnalysis, log: Logger, indent = ''): void => {
 	const lines = format_dev_cycles(analysis);
 	for (const line of lines) {
 		log.info(indent + line);
@@ -104,9 +94,9 @@ export const log_dev_cycles = (
  * Production cycles block publishing and must be resolved.
  */
 export const log_production_cycles = (
-	analysis: ReturnType<DependencyGraphBuilder['analyze']>,
+	analysis: DependencyAnalysis,
 	log: Logger,
-	indent = '',
+	indent = ''
 ): void => {
 	const lines = format_production_cycles(analysis);
 	for (const line of lines) {
@@ -119,9 +109,9 @@ export const log_production_cycles = (
  * Convenience function that calls all three logging functions in order.
  */
 export const log_dependency_analysis = (
-	analysis: ReturnType<DependencyGraphBuilder['analyze']>,
+	analysis: DependencyAnalysis,
 	log: Logger,
-	indent = '',
+	indent = ''
 ): void => {
 	log_wildcard_dependencies(analysis, log, indent);
 	log_production_cycles(analysis, log, indent);

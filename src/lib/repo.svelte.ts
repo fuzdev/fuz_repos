@@ -1,22 +1,27 @@
-import {create_context} from '@fuzdev/fuz_ui/context_helpers.ts';
-import type {LibraryJson, SourceJson} from '@fuzdev/fuz_util/library_json.ts';
-import type {PkgJson} from '@fuzdev/fuz_util/pkg_json.ts';
-import type {PackageJson} from '@fuzdev/fuz_util/package_json.ts';
-import type {Url} from '@fuzdev/fuz_util/url.ts';
-import {Library} from '@fuzdev/fuz_ui/library.svelte.ts';
+import { create_context } from '@fuzdev/fuz_ui/context_helpers.ts';
+import type { LibraryJson, SourceJson } from '@fuzdev/fuz_util/library_json.ts';
+import type { PkgJson } from '@fuzdev/fuz_util/pkg_json.ts';
+import type { PackageJson } from '@fuzdev/fuz_util/package_json.ts';
+import type { Url } from '@fuzdev/fuz_util/url.ts';
+import { Library } from '@fuzdev/fuz_ui/library.svelte.ts';
 
-import {GithubCheckRunsItem, type GithubPullRequest} from './github.ts';
+import { GithubCheckRunsItem, type GithubPullRequest } from './github.ts';
 
 /**
  * Serialized repo data as stored in `repos.ts` (JSON).
  *
  * `package_json` is the repo's full `package.json`, carried alongside
- * `library_json` because gitops reads `dependencies`/`devDependencies` for the
+ * `library_json` because fuz_repos reads `dependencies`/`devDependencies` for the
  * publishing cascade — fields the curated `LibraryJson.pkg_json` omits.
  */
 export interface RepoJson {
 	library_json: LibraryJson;
 	package_json: PackageJson;
+	/**
+	 * The branch the repo's registry entry follows, which `check_runs` was
+	 * fetched for. `Repo.branch` reads `main` when it's absent.
+	 */
+	branch?: string;
 	check_runs: GithubCheckRunsItem | null;
 	pull_requests: Array<GithubPullRequest> | null;
 }
@@ -31,6 +36,8 @@ export class Repo {
 	readonly library: Library;
 	/** The repo's full `package.json` (with `dependencies`/`devDependencies`). */
 	readonly package_json: PackageJson;
+	/** The branch CI status was fetched for and the dashboard links to. */
+	readonly branch: string;
 	check_runs: GithubCheckRunsItem | null;
 	pull_requests: Array<GithubPullRequest> | null;
 
@@ -70,6 +77,7 @@ export class Repo {
 	constructor(repo_json: RepoJson) {
 		this.library = new Library(repo_json.library_json);
 		this.package_json = repo_json.package_json;
+		this.branch = repo_json.branch ?? 'main';
 		this.check_runs = repo_json.check_runs;
 		this.pull_requests = repo_json.pull_requests;
 	}
@@ -87,5 +95,5 @@ export const repos_parse = (repos: Array<Repo>, homepage_url: string): Repos => 
 	const repo = repos.find((d) => d.homepage_url === homepage_url);
 	if (!repo) throw Error(`Cannot find repo with homepage_url: ${homepage_url}`);
 
-	return {repo, repos};
+	return { repo, repos };
 };

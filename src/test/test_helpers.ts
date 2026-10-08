@@ -1,18 +1,62 @@
-import type {LibraryJson} from '@fuzdev/fuz_util/library_json.ts';
-import type {PackageJson} from '@fuzdev/fuz_util/package_json.ts';
-import {Library} from '@fuzdev/fuz_ui/library.svelte.ts';
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import type { LibraryJson } from '@fuzdev/fuz_util/library_json.ts';
+import type { PackageJson } from '@fuzdev/fuz_util/package_json.ts';
+import { Library } from '@fuzdev/fuz_ui/library.svelte.ts';
+import { Logger } from '@fuzdev/fuz_util/log.ts';
 
-import type {LocalRepo} from '$lib/local_repo.ts';
+import type { LocalRepo } from '$lib/local_repo.ts';
 import type {
 	GitopsOperations,
-	ChangesetOperations,
 	GitOperations,
 	FsOperations,
 	NpmOperations,
 	BuildOperations,
 	ProcessOperations,
+	ReposCommandOutput,
+	ReposOperations
 } from '$lib/operations.ts';
-import type {BumpType} from '$lib/version_utils.ts';
+import type { RepoReadinessProblem } from '$lib/repo_readiness.ts';
+import {
+	REPOS_STATUS_FORMAT_VERSION,
+	type ReposCheckout,
+	type ReposEntryStatus,
+	type ReposStatusReport
+} from '$lib/repos_status.ts';
+
+/** A logger that records what reaches each stream, as Node's console routes it. */
+export type StreamLog = Logger & {
+	stdout: Array<string>;
+	stderr: Array<string>;
+	/** Every line on either stream, in the order logged. */
+	lines: Array<string>;
+};
+
+/**
+ * Creates a logger at `debug` whose console records by stream the way Node's
+ * does: `log` on `stdout`, `warn` and `error` on `stderr`, and every line in
+ * order on `lines`. A task that routes its human output to stderr
+ * (`route_human_output`) leaves `stdout` holding only its document.
+ */
+export const create_stream_log = (): StreamLog => {
+	const stdout: Array<string> = [];
+	const stderr: Array<string> = [];
+	const lines: Array<string> = [];
+	const record =
+		(stream: Array<string>) =>
+		(...args: Array<unknown>): void => {
+			const line = args.join(' ');
+			stream.push(line);
+			lines.push(line);
+		};
+	const log = new Logger('test', {
+		level: 'debug',
+		colors: false,
+		console: { log: record(stdout), warn: record(stderr), error: record(stderr) }
+	});
+	return Object.assign(log, { stdout, stderr, lines });
+};
 
 export interface MockRepoOptions {
 	name: string;
@@ -37,16 +81,16 @@ export const create_mock_package_json = (options: MockRepoOptions): PackageJson 
 		deps = {},
 		dev_deps = {},
 		peer_deps = {},
-		private: private_option = false,
+		private: private_option = false
 	} = options;
 	return {
 		name,
 		version,
 		private: private_option,
-		repository: {type: 'git', url: `git+https://github.com/test/${name}.git`},
+		repository: { type: 'git', url: `git+https://github.com/test/${name}.git` },
 		dependencies: Object.keys(deps).length > 0 ? deps : undefined,
 		devDependencies: Object.keys(dev_deps).length > 0 ? dev_deps : undefined,
-		peerDependencies: Object.keys(peer_deps).length > 0 ? peer_deps : undefined,
+		peerDependencies: Object.keys(peer_deps).length > 0 ? peer_deps : undefined
 	};
 };
 
@@ -55,14 +99,14 @@ export const create_mock_package_json = (options: MockRepoOptions): PackageJson 
  */
 export const create_mock_library_json = (options: MockRepoOptions): LibraryJson => ({
 	pkg_json: create_mock_package_json(options),
-	source_json: {modules: []},
+	source_json: { modules: [] }
 });
 
 /**
  * Creates a mock LocalRepo for testing
  */
 export const create_mock_repo = (options: MockRepoOptions): LocalRepo => {
-	const {name, deps = {}, dev_deps = {}, peer_deps = {}, kind = 'npm'} = options;
+	const { name, deps = {}, dev_deps = {}, peer_deps = {}, kind = 'npm' } = options;
 	const library_json = create_mock_library_json(options);
 
 	return {
@@ -70,18 +114,10 @@ export const create_mock_repo = (options: MockRepoOptions): LocalRepo => {
 		library: new Library(library_json),
 		package_json: create_mock_package_json(options),
 		repo_dir: `/test/${name}`,
-		repo_git_ssh_url: `git@github.com:test/${name}.git`,
-		repo_config: {
-			repo_url: `https://github.com/test/${name}`,
-			repo_dir: null,
-			branch: 'main',
-			visibility: 'public',
-			ci: true,
-			archived: false,
-		},
+		entry: create_mock_repos_entry({ key: name }),
 		dependencies: new Map(Object.entries(deps)),
 		dev_dependencies: new Map(Object.entries(dev_deps)),
-		peer_dependencies: new Map(Object.entries(peer_deps)),
+		peer_dependencies: new Map(Object.entries(peer_deps))
 	};
 };
 
@@ -97,42 +133,38 @@ export const create_mock_gitops_ops = (
 		preflight: Partial<GitopsOperations['preflight']>;
 		fs: Partial<GitopsOperations['fs']>;
 		build: Partial<GitopsOperations['build']>;
-	}> = {},
+		repos: Partial<GitopsOperations['repos']>;
+	}> = {}
 ): GitopsOperations => ({
 	changeset: {
-		has_changesets: async () => ({ok: true, value: true}),
-		read_changesets: async () => ({ok: true, value: []}),
+		has_changesets: async () => ({ ok: true, value: true }),
+		read_changesets: async () => ({ ok: true, value: [] }),
 		predict_next_version: async (options) => ({
 			ok: true,
 			version: incrementPatch(options.repo.package_json.version || '0.0.0'),
-			bump_type: 'patch' as const,
+			bump_type: 'patch' as const
 		}),
-		...overrides.changeset,
+		...overrides.changeset
 	},
 	git: create_mock_git_ops(overrides.git),
 	process: {
-		spawn: async () => ({ok: true}),
-		...overrides.process,
+		run_interactive: async () => ({ ok: true }),
+		...overrides.process
 	},
 	npm: create_mock_npm_ops(overrides.npm),
 	preflight: {
-		run_preflight_checks: async () => ({
-			ok: true,
-			warnings: [],
-			errors: [],
-			repos_with_changesets: new Set(),
-			repos_without_changesets: new Set(),
-		}),
-		...overrides.preflight,
+		run_preflight_checks: async () => ({ ok: true, warnings: [], errors: [] }),
+		...overrides.preflight
 	},
 	fs: {
-		readFile: async () => ({ok: true, value: '{}'}),
-		writeFile: async () => ({ok: true}),
-		mkdir: async () => ({ok: true}),
+		readFile: async () => ({ ok: true, value: '{}' }),
+		writeFile: async () => ({ ok: true }),
+		mkdir: async () => ({ ok: true }),
 		exists: async () => true,
-		...overrides.fs,
+		...overrides.fs
 	},
 	build: create_mock_build_ops(overrides.build),
+	repos: { ...create_ready_repos_ops(), ...overrides.repos }
 });
 
 /**
@@ -148,7 +180,7 @@ const incrementPatch = (version: string): string => {
  */
 export const create_mock_package_json_files = (
 	repos: Array<LocalRepo>,
-	updatedVersions: Map<string, string> = new Map(),
+	updatedVersions: Map<string, string> = new Map()
 ): Map<string, string> => {
 	const fs: Map<string, string> = new Map();
 
@@ -159,7 +191,7 @@ export const create_mock_package_json_files = (
 
 		const packageJson = {
 			...repo.package_json,
-			version,
+			version
 		};
 
 		fs.set(`${repo.repo_dir}/package.json`, JSON.stringify(packageJson, null, 2));
@@ -169,106 +201,33 @@ export const create_mock_package_json_files = (
 };
 
 /**
- * Creates a mock repo with simulated changesets directory
- */
-export const create_mock_repo_with_changesets = (
-	options: MockRepoOptions & {changesets?: boolean},
-): LocalRepo & {has_changesets: boolean} => {
-	const repo = create_mock_repo(options);
-	const has_changesets = options.changesets ?? true;
-
-	return {
-		...repo,
-		has_changesets,
-	};
-};
-
-/**
- * Creates mock ChangesetOperations with custom version predictions
- */
-export const create_mock_changeset_ops = (
-	versionPredictions: Map<string, {version: string; bump_type: BumpType}>,
-	reposWithChangesets: Set<string> = new Set(),
-): ChangesetOperations => ({
-	has_changesets: async (options) => ({
-		ok: true,
-		value: reposWithChangesets.has(options.repo.library.name),
-	}),
-	read_changesets: async () => ({ok: true, value: []}),
-	predict_next_version: async (options) => {
-		const prediction = versionPredictions.get(options.repo.library.name);
-		if (!prediction) return null;
-		return {ok: true, ...prediction};
-	},
-});
-
-/**
  * Creates mock GitOperations for testing
  */
 export const create_mock_git_ops = (overrides: Partial<GitOperations> = {}): GitOperations => ({
-	current_branch_name: async () => ({ok: true, value: 'main'}),
-	current_commit_hash: async () => ({ok: true, value: 'abc123'}),
-	check_clean_workspace: async () => ({ok: true, value: true}),
-	checkout: async () => ({ok: true}),
-	pull: async () => ({ok: true}),
-	switch_branch: async () => ({ok: true}),
-	has_remote: async () => ({ok: true, value: false}),
-	add: async () => ({ok: true}),
-	commit: async () => ({ok: true}),
-	add_and_commit: async () => ({ok: true}),
-	has_changes: async () => ({ok: true, value: false}),
-	list_uncommitted_files: async () => ({ok: true, value: []}),
-	tag: async () => ({ok: true}),
-	push_tag: async () => ({ok: true}),
-	stash: async () => ({ok: true}),
-	stash_pop: async () => ({ok: true}),
-	has_file_changed: async () => ({ok: true, value: false}),
-	...overrides,
+	current_commit_hash: async () => ({ ok: true, value: 'abc123' }),
+	add: async () => ({ ok: true }),
+	commit: async () => ({ ok: true }),
+	...overrides
 });
 
 /**
  * Creates mock NpmOperations for testing
  */
 export const create_mock_npm_ops = (overrides: Partial<NpmOperations> = {}): NpmOperations => ({
-	wait_for_package: async () => ({ok: true}),
-	check_auth: async () => ({ok: true, username: 'testuser'}),
-	check_registry: async () => ({ok: true}),
-	install: async () => ({ok: true}),
-	...overrides,
+	wait_for_package: async () => ({ ok: true }),
+	check_auth: async () => ({ ok: true, username: 'testuser' }),
+	check_registry: async () => ({ ok: true }),
+	...overrides
 });
 
 /**
  * Creates mock BuildOperations for testing
  */
 export const create_mock_build_ops = (
-	overrides: Partial<BuildOperations> = {},
+	overrides: Partial<BuildOperations> = {}
 ): BuildOperations => ({
-	build_package: async () => ({ok: true}),
-	...overrides,
-});
-
-/**
- * Creates a successful preflight mock with specified repos
- */
-export const create_preflight_mock = (
-	repos_with_changesets: Array<string> = [],
-	repos_without_changesets: Array<string> = [],
-): {
-	run_preflight_checks: () => Promise<{
-		ok: boolean;
-		warnings: Array<string>;
-		errors: Array<string>;
-		repos_with_changesets: Set<string>;
-		repos_without_changesets: Set<string>;
-	}>;
-} => ({
-	run_preflight_checks: async () => ({
-		ok: true,
-		warnings: [],
-		errors: [],
-		repos_with_changesets: new Set(repos_with_changesets),
-		repos_without_changesets: new Set(repos_without_changesets),
-	}),
+	build_package: async () => ({ ok: true }),
+	...overrides
 });
 
 /**
@@ -285,17 +244,17 @@ export const create_mock_fs_ops = (): FsOperations & {
 		readFile: async (options) => {
 			const content = files.get(options.path);
 			if (content === undefined) {
-				return {ok: false, kind: 'not_found', message: `File not found: ${options.path}`};
+				return { ok: false, kind: 'not_found', message: `File not found: ${options.path}` };
 			}
-			return {ok: true, value: content};
+			return { ok: true, value: content };
 		},
 		writeFile: async (options) => {
 			files.set(options.path, options.content);
-			return {ok: true};
+			return { ok: true };
 		},
 		mkdir: async (options) => {
 			dirs.add(options.path);
-			return {ok: true};
+			return { ok: true };
 		},
 		exists: async (options) => {
 			return files.has(options.path) || dirs.has(options.path);
@@ -303,7 +262,7 @@ export const create_mock_fs_ops = (): FsOperations & {
 		get: (path: string): string | undefined => files.get(path),
 		set: (path: string, content: string): void => {
 			files.set(path, content);
-		},
+		}
 	};
 };
 
@@ -312,7 +271,7 @@ export const create_mock_fs_ops = (): FsOperations & {
  */
 export const create_populated_fs_ops = (
 	repos: Array<LocalRepo>,
-	updated_versions?: Map<string, string>,
+	updated_versions?: Map<string, string>
 ): FsOperations & {
 	get: (path: string) => string | undefined;
 	set: (path: string, content: string) => void;
@@ -332,10 +291,12 @@ export interface TrackedCommand {
 	cmd: string;
 	args: Array<string>;
 	cwd: string;
+	/** Where the command's stdout was routed, as the executor asked. */
+	stdout?: 'stdout' | 'stderr';
 }
 
 /**
- * Creates process operations that track which commands were spawned
+ * Creates process operations that track which commands were run
  */
 export const create_tracking_process_ops = (): {
 	ops: ProcessOperations;
@@ -347,19 +308,194 @@ export const create_tracking_process_ops = (): {
 
 	return {
 		ops: {
-			spawn: async (options) => {
+			run_interactive: async (options) => {
 				spawned_commands.push({
 					cmd: options.cmd,
 					args: options.args,
 					cwd: options.cwd ?? '',
+					stdout: options.stdout
 				});
-				return {ok: true};
-			},
+				return { ok: true };
+			}
 		},
 		get_spawned_commands: () => spawned_commands,
 		get_commands_by_type: (cmd_name: string) =>
 			spawned_commands.filter((c) => c.cmd === 'gro' && c.args[0] === cmd_name),
 		get_package_names_from_cwd: (commands: Array<TrackedCommand>) =>
-			commands.map((c) => c.cwd.split('/').pop() || ''),
+			commands.map((c) => c.cwd.split('/').pop() || '')
 	};
 };
+
+/**
+ * Creates a mock `repos status` entry: an owned public repo, present, clean,
+ * and on its branch `main`, in sync with origin. `overrides` replace fields whole.
+ */
+export const create_mock_repos_entry = (
+	overrides: Partial<ReposEntryStatus> & { key: string }
+): ReposEntryStatus => {
+	const { key } = overrides;
+	const dir = overrides.dir ?? key;
+	return {
+		kind: 'repo',
+		dir,
+		url: `https://github.com/test/${key}`,
+		writable: true,
+		archived: false,
+		visibility: 'public',
+		ci: true,
+		branch: 'main',
+		pinned: false,
+		refresh: null,
+		presence: { kind: 'present' },
+		clone: null,
+		layout: { shallow: false, sparse: false, partial_filter: null },
+		checkouts: [
+			{
+				path: `/test/${dir}`,
+				primary: true,
+				head: { kind: 'branch', name: 'main' },
+				uncommitted: { staged: 0, unstaged: 0, untracked: 0, conflicted: 0 },
+				in_progress: null,
+				locked: false,
+				linked: false,
+				submodules: null,
+				busy: []
+			}
+		],
+		branches: [],
+		at_rest: { on_branch: true, clean: true, idle: true, followed: { kind: 'in_sync' } },
+		stashes: 0,
+		fetched_at: null,
+		needs_human: [],
+		probe_error: null,
+		unprobed_worktrees: [],
+		fetch_error: null,
+		visibility_check: null,
+		...overrides
+	};
+};
+
+/**
+ * Creates a mock `repos status --json` report over `entries`, its workspace `/test`.
+ */
+export const create_mock_repos_report = (
+	entries: Array<ReposEntryStatus>,
+	overrides: Partial<ReposStatusReport> = {}
+): ReposStatusReport => ({
+	version: REPOS_STATUS_FORMAT_VERSION,
+	workspace: '/test',
+	registry: '/test/repos.toml',
+	fetched: false,
+	sessions: { kind: 'available', unscoped: [] },
+	entries,
+	unregistered: null,
+	...overrides
+});
+
+/**
+ * Creates mock ReposOperations whose `status` prints `printed` (a document as
+ * JSON, or raw text) and records each call's options. It exits `2` for an
+ * error document, else `0`.
+ */
+export const create_mock_repos_ops = (
+	printed: object | string,
+	overrides: Partial<ReposOperations> = {}
+): ReposOperations & {
+	calls: Array<{ keys: Array<string>; registry?: string; fetch?: boolean }>;
+} => {
+	const calls: Array<{ keys: Array<string>; registry?: string; fetch?: boolean }> = [];
+	const stdout = typeof printed === 'string' ? printed : JSON.stringify(printed);
+	const output: ReposCommandOutput = {
+		stdout,
+		stderr: '',
+		exit_code: typeof printed === 'object' && 'error' in printed ? 2 : 0
+	};
+	return {
+		calls,
+		status: async (options) => {
+			calls.push(options);
+			return { ok: true, output };
+		},
+		...overrides
+	};
+};
+
+/**
+ * Creates mock ReposOperations whose `status` reports every requested key as a
+ * ready entry (`create_mock_repos_entry`), fetched when asked to fetch, and
+ * records each call. `entries` replaces the entry for a key; `fetched`, when
+ * given, replaces it instead in a run with `--fetch`.
+ */
+export const create_ready_repos_ops = (
+	entries: Record<string, ReposEntryStatus> = {},
+	fetched: Record<string, ReposEntryStatus> = entries
+): ReposOperations & {
+	calls: Array<{ keys: Array<string>; registry?: string; fetch?: boolean }>;
+} => {
+	const calls: Array<{ keys: Array<string>; registry?: string; fetch?: boolean }> = [];
+	return {
+		calls,
+		status: async (options) => {
+			calls.push(options);
+			const by_key = options.fetch ? fetched : entries;
+			const report = create_mock_repos_report(
+				options.keys.map((key) => by_key[key] ?? create_mock_repos_entry({ key })),
+				{ fetched: options.fetch === true }
+			);
+			return { ok: true, output: { stdout: JSON.stringify(report), stderr: '', exit_code: 0 } };
+		}
+	};
+};
+
+/**
+ * Two npm repos, `b` depending on `a`, and a cargo one `c`, for the readiness
+ * gate's tests; `b_entry` is `b`'s entry as the local, unfetched status read it.
+ */
+export const create_gate_repos = (b_entry?: ReposEntryStatus): Array<LocalRepo> => {
+	const a = create_mock_repo({ name: 'a' });
+	const b = create_mock_repo({ name: 'b', deps: { a: '^1.0.0' } });
+	if (b_entry) b.entry = b_entry;
+	const c = create_mock_repo({ name: 'c', kind: 'cargo' });
+	return [a, b, c];
+};
+
+/**
+ * The `repos --json` golden documents, written by the Rust side
+ * (`crates/fuz_repos/tests/golden.rs`), never by hand.
+ */
+export const GOLDEN_DIR = join(dirname(fileURLToPath(import.meta.url)), 'fixtures/repos_status');
+
+/** Reads the golden `name` as the text `repos` printed. */
+export const read_golden = (name: string): string => readFileSync(join(GOLDEN_DIR, name), 'utf8');
+
+/** Reads the golden `name` as parsed JSON. */
+export const load_golden = (name: string): unknown => JSON.parse(read_golden(name));
+
+/** An entry `key` whose primary checkout overrides `checkout`, with `at_rest` set whole. */
+export const entry_with = (
+	key: string,
+	options: {
+		checkout?: Partial<ReposCheckout>;
+		at_rest?: ReposEntryStatus['at_rest'];
+	} & Partial<Omit<ReposEntryStatus, 'at_rest' | 'checkouts'>>
+): ReposEntryStatus => {
+	const { checkout, at_rest, ...rest } = options;
+	const base = create_mock_repos_entry({ key });
+	const primary = { ...base.checkouts[0]!, path: `/test/${key}`, ...checkout };
+	return {
+		...base,
+		...rest,
+		checkouts: [primary],
+		at_rest: at_rest === undefined ? base.at_rest : at_rest
+	};
+};
+
+export const AT_REST = {
+	on_branch: true,
+	clean: true,
+	idle: true,
+	followed: { kind: 'in_sync' }
+} as const;
+
+export const kinds = (problems: Array<RepoReadinessProblem>): Array<string> =>
+	problems.map((p) => p.kind);

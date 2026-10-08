@@ -1,12 +1,12 @@
 <script lang="ts">
-	import {page} from '$app/state';
+	import { page } from '$app/state';
 
-	import type {Repo} from './repo.svelte.ts';
+	import type { Repo } from './repo.svelte.ts';
 
 	// TODO add highlighting of the items that are onscreen
 
 	const {
-		repos_modules,
+		repos_modules
 	}: {
 		repos_modules: Array<{
 			repo: Repo;
@@ -22,9 +22,12 @@
 	<ul class="unstyled">
 		{#each repos_modules as pkg_modules (pkg_modules)}
 			<li role="none">
-				<a href="#{pkg_modules.repo.name}" class:selected={pkg_modules.repo.name === page.url.hash}
-					>{pkg_modules.repo.name}</a
+				<a
+					href="#{pkg_modules.repo.name}"
+					class:selected={`#${pkg_modules.repo.name}` === page.url.hash}
 				>
+					{pkg_modules.repo.name}
+				</a>
 			</li>
 		{/each}
 	</ul>

@@ -1,17 +1,16 @@
-import {assert, test, describe} from 'vitest';
+import { assert, test, describe } from 'vitest';
 
-import {summarize_events, type PublishingEvent} from '$lib/publishing_event.ts';
+import { summarize_events, type PublishingEvent } from '$lib/publishing_event.ts';
 import {
-	null_handler,
 	capture_handler,
 	multi_handler,
 	masking_handler,
 	stdout_handler,
 	redact_secrets,
-	mask_secrets,
+	mask_secrets
 } from '$lib/publishing_event_handler.ts';
 
-const run_started: PublishingEvent = {event: 'run_started', wetrun: false, total: 3};
+const run_started: PublishingEvent = { event: 'run_started', wetrun: false, total: 3 };
 const completed: PublishingEvent = {
 	event: 'package_completed',
 	name: 'a',
@@ -20,7 +19,7 @@ const completed: PublishingEvent = {
 	bump_type: 'patch',
 	breaking: false,
 	commit: 'simulated',
-	tag: 'v1.0.1',
+	tag: 'v1.0.1'
 };
 
 describe('event handlers', () => {
@@ -31,12 +30,6 @@ describe('event handlers', () => {
 		assert.strictEqual(capture.events.length, 2);
 		assert.strictEqual(capture.events[0]!.event, 'run_started');
 		assert.strictEqual(capture.events[1]!.event, 'package_completed');
-	});
-
-	test('null_handler drops events without throwing', () => {
-		const handler = null_handler();
-		handler.emit(run_started); // should be a no-op
-		assert.ok(handler);
 	});
 
 	test('multi_handler fans out to every handler', () => {
@@ -69,6 +62,15 @@ describe('event handlers', () => {
 		assert.strictEqual(parsed.wetrun, false);
 	});
 
+	test('stdout_handler writes each event as one line through an injected writer', () => {
+		const lines: Array<string> = [];
+		const handler = stdout_handler((line) => lines.push(line));
+		handler.emit(run_started);
+		handler.emit(completed);
+		assert.strictEqual(lines.length, 2);
+		assert.strictEqual(JSON.parse(lines[1]!).event, completed.event);
+	});
+
 	test('masking_handler redacts secrets before forwarding', () => {
 		const inner = capture_handler();
 		const handler = masking_handler(inner);
@@ -76,7 +78,7 @@ describe('event handlers', () => {
 			event: 'package_failed',
 			name: 'pkg-a',
 			error: 'publish failed: SECRET_NPM_TOKEN=hunter2',
-			code: 'auth',
+			code: 'publish'
 		});
 		const event = inner.events[0]!;
 		assert.strictEqual(event.event, 'package_failed');
@@ -90,7 +92,7 @@ describe('redact_secrets', () => {
 	test('redacts npm auth tokens (registry-scoped and bare)', () => {
 		assert.strictEqual(
 			redact_secrets('//registry.npmjs.org/:_authToken=abcd1234secretvalue'),
-			'//registry.npmjs.org/:_authToken=[redacted]',
+			'//registry.npmjs.org/:_authToken=[redacted]'
 		);
 		assert.strictEqual(redact_secrets('_authToken=plainsecret'), '_authToken=[redacted]');
 	});
@@ -98,14 +100,14 @@ describe('redact_secrets', () => {
 	test('redacts SECRET_* env assignments', () => {
 		assert.strictEqual(
 			redact_secrets('export SECRET_GITHUB_API_TOKEN=ghp_example'),
-			'export SECRET_GITHUB_API_TOKEN=[redacted]',
+			'export SECRET_GITHUB_API_TOKEN=[redacted]'
 		);
 	});
 
 	test('redacts npm_-prefixed tokens', () => {
 		assert.strictEqual(
 			redact_secrets('using npm_abcdEFGH1234567890xyz to auth'),
-			'using npm_abcd[redacted] to auth',
+			'using npm_abcd[redacted] to auth'
 		);
 	});
 
@@ -127,10 +129,10 @@ describe('mask_secrets', () => {
 describe('summarize_events', () => {
 	test('tallies outcomes and carries duration', () => {
 		const events: Array<PublishingEvent> = [
-			{event: 'run_started', wetrun: false, total: 3},
+			{ event: 'run_started', wetrun: false, total: 3 },
 			completed,
-			{event: 'package_failed', name: 'b', error: 'boom', code: 'publish'},
-			{event: 'package_skipped', name: 'c', reason: 'no changesets'},
+			{ event: 'package_failed', name: 'b', error: 'boom', code: 'publish' },
+			{ event: 'package_skipped', name: 'c', reason: 'no changesets' }
 		];
 		const summary = summarize_events(events, 1234);
 		assert.strictEqual(summary.total, 3);

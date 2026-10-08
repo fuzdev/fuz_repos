@@ -1,9 +1,10 @@
-import type {Logger} from '@fuzdev/fuz_util/log.ts';
-import {z} from 'zod';
-import {fetch_value, type FetchValueCache} from '@fuzdev/fuz_util/fetch.ts';
+import type { Logger } from '@fuzdev/fuz_util/log.ts';
+import { z } from 'zod';
+import { fetch_value, type FetchValueCache } from '@fuzdev/fuz_util/fetch.ts';
+import type { Result } from '@fuzdev/fuz_util/result.ts';
 
 /**
- * Minimal interface for GitHub API calls - works with both `Pkg` and `Repo`.
+ * Minimal interface for GitHub API calls, satisfied structurally by fuz_ui's `Library`.
  */
 export interface GithubRepoInfo {
 	owner_name: string | null;
@@ -17,9 +18,9 @@ export const GithubPullRequest = z.object({
 	number: z.number(),
 	title: z.string(),
 	user: z.object({
-		login: z.string(),
+		login: z.string()
 	}),
-	draft: z.boolean(),
+	draft: z.boolean()
 });
 export type GithubPullRequest = z.infer<typeof GithubPullRequest>;
 export const GithubPullRequests = z.array(GithubPullRequest);
@@ -35,24 +36,26 @@ export const fetch_github_pull_requests = async (
 		log?: Logger;
 		token?: string;
 		api_version?: string;
-	} = {},
+		fetch?: typeof globalThis.fetch;
+	} = {}
 ): Promise<GithubPullRequests | null> => {
-	const {cache, log, token, api_version} = options;
+	const { cache, log, token, api_version, fetch } = options;
 	if (!repo_info.owner_name) throw Error('owner_name is required');
-	const headers = api_version ? new Headers({'x-github-api-version': api_version}) : undefined;
+	const headers = api_version ? new Headers({ 'x-github-api-version': api_version }) : undefined;
 	const url = `https://api.github.com/repos/${repo_info.owner_name}/${repo_info.repo_name}/pulls`;
 	const fetched = await fetch_value(url, {
-		request: {headers},
+		request: { headers },
 		parse: GithubPullRequests.parse,
 		token,
 		cache,
 		log,
+		fetch
 	});
 	if (!fetched.ok) {
 		// TODO @many this is messy but I think it's the main case we need to worry about?
 		if (fetched.status === 401) {
 			throw Error(
-				'401 response fetching github pull requests - check your SECRET_GITHUB_API_TOKEN',
+				'401 response fetching github pull requests - check your SECRET_GITHUB_API_TOKEN'
 			);
 		}
 		return null;
@@ -67,16 +70,23 @@ export const GithubCheckRunsItem = z.object({
 	status: z.enum(['queued', 'in_progress', 'completed']),
 	conclusion: z
 		.enum(['success', 'failure', 'neutral', 'cancelled', 'skipped', 'timed_out', 'action_required'])
-		.nullable(),
+		.nullable()
 });
 export type GithubCheckRunsItem = z.infer<typeof GithubCheckRunsItem>;
 export const GithubCheckRuns = z.object({
 	total_count: z.number(),
-	check_runs: z.array(GithubCheckRunsItem),
+	check_runs: z.array(GithubCheckRunsItem)
 });
 export type GithubCheckRuns = z.infer<typeof GithubCheckRuns>;
 
 /**
+ * Fetches the check runs on `ref` and reduces them to one overall status and
+ * conclusion.
+ *
+ * @param repo_info - the repo's GitHub owner and name
+ * @param options - the cache, logger, token, API version, ref (`main` by default), and `fetch`
+ * @returns the reduced check runs, `null` for a ref with none (a repo without CI, or a commit CI skipped), or a failure when the request or its parse failed
+ * @throws {Error} on a 401 response (check `SECRET_GITHUB_API_TOKEN`) or a repo without an owner
  * @see https://docs.github.com/en/rest/checks/runs?apiVersion=2022-11-28#list-check-runs-for-a-git-reference
  */
 export const fetch_github_check_runs = async (
@@ -87,27 +97,29 @@ export const fetch_github_check_runs = async (
 		token?: string;
 		api_version?: string;
 		ref?: string;
-	} = {},
-): Promise<GithubCheckRunsItem | null> => {
-	const {cache, log, token, api_version, ref = 'main'} = options;
+		fetch?: typeof globalThis.fetch;
+	} = {}
+): Promise<Result<{ value: GithubCheckRunsItem | null }, { status: number; message: string }>> => {
+	const { cache, log, token, api_version, ref = 'main', fetch } = options;
 	if (!repo_info.owner_name) throw Error('owner_name is required');
-	const headers = api_version ? new Headers({'x-github-api-version': api_version}) : undefined;
+	const headers = api_version ? new Headers({ 'x-github-api-version': api_version }) : undefined;
 	const url = `https://api.github.com/repos/${repo_info.owner_name}/${repo_info.repo_name}/commits/${ref}/check-runs`;
 	const fetched = await fetch_value(url, {
-		request: {headers},
+		request: { headers },
 		parse: (v) => reduce_check_runs(GithubCheckRuns.parse(v).check_runs),
 		token,
 		cache,
 		log,
+		fetch
 	});
 	if (!fetched.ok) {
 		// TODO @many this is messy but I think it's the main case we need to worry about?
 		if (fetched.status === 401) {
 			throw Error('401 response fetching github CI status - check your SECRET_GITHUB_API_TOKEN');
 		}
-		return null;
+		return { ok: false, status: fetched.status, message: fetched.message };
 	}
-	return fetched.value;
+	return { ok: true, value: fetched.value };
 };
 
 const reduce_check_runs = (check_runs: Array<GithubCheckRunsItem>): GithubCheckRunsItem | null => {
@@ -123,5 +135,5 @@ const reduce_check_runs = (check_runs: Array<GithubCheckRunsItem>): GithubCheckR
 			conclusion = check_run.conclusion;
 		}
 	}
-	return {status, conclusion};
+	return { status, conclusion };
 };

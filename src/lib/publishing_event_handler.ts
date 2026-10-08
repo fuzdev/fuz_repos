@@ -4,12 +4,18 @@
  * A `PublishingEventHandler` is anything that can receive a `PublishingEvent`. Handlers
  * compose: `multi_handler` fans out, `masking_handler` redacts secrets then forwards.
  * Emission is best-effort and synchronous — an observability sink must never fail or
- * slow a run. The default sink is `null_handler` (drops everything).
+ * slow a run. The executor always captures events for its result (`capture_handler`)
+ * and forwards them to the caller's sink when one is supplied.
  *
  * @module
  */
 
-import type {PublishingEvent} from './publishing_event.ts';
+import type { PublishingEvent } from './publishing_event.ts';
+import type { WriteStdout } from './output_helpers.ts';
+
+const write_process_stdout_line: WriteStdout = (line) => {
+	process.stdout.write(line + '\n');
+};
 
 /** A sink for publishing events. */
 export interface PublishingEventHandler {
@@ -21,11 +27,6 @@ export interface CapturingEventHandler extends PublishingEventHandler {
 	readonly events: Array<PublishingEvent>;
 }
 
-/** Drops every event. The default when no handler is supplied. */
-export const null_handler = (): PublishingEventHandler => ({
-	emit: () => {},
-});
-
 /** Collects events in memory. Used to build the run report and in tests. */
 export const capture_handler = (): CapturingEventHandler => {
 	const events: Array<PublishingEvent> = [];
@@ -33,22 +34,26 @@ export const capture_handler = (): CapturingEventHandler => {
 		events,
 		emit: (event) => {
 			events.push(event);
-		},
+		}
 	};
 };
 
 /**
- * Writes each event as one JSON object per line (JSON-lines) to `process.stdout`.
+ * Writes each event as one JSON object per line (JSON-lines) to stdout.
  * Write failures are swallowed — the stream is observability, not control flow.
+ *
+ * @param write_line - writes one line and its newline; defaults to `process.stdout`
  */
-export const stdout_handler = (): PublishingEventHandler => ({
+export const stdout_handler = (
+	write_line: WriteStdout = write_process_stdout_line
+): PublishingEventHandler => ({
 	emit: (event) => {
 		try {
-			process.stdout.write(JSON.stringify(event) + '\n');
+			write_line(JSON.stringify(event));
 		} catch {
 			// best-effort: a logging sink must never fail a run
 		}
-	},
+	}
 });
 
 /** Fans an event out to every handler in order. */
@@ -57,22 +62,19 @@ export const multi_handler = (handlers: Array<PublishingEventHandler>): Publishi
 		for (const handler of handlers) {
 			handler.emit(event);
 		}
-	},
+	}
 });
 
 /**
- * Wraps a handler, masking secrets in each event's string fields before forwarding.
+ * Wraps a handler, masking secrets in each event's string fields (`mask_secrets`)
+ * before forwarding.
  *
  * @param inner - the handler to forward masked events to
- * @param mask - the masking function, defaults to `mask_secrets`
  */
-export const masking_handler = (
-	inner: PublishingEventHandler,
-	mask: (event: PublishingEvent) => PublishingEvent = mask_secrets,
-): PublishingEventHandler => ({
+export const masking_handler = (inner: PublishingEventHandler): PublishingEventHandler => ({
 	emit: (event) => {
-		inner.emit(mask(event));
-	},
+		inner.emit(mask_secrets(event));
+	}
 });
 
 // Minimal redaction rules: npm auth tokens (bare or registry-scoped), `SECRET_*`
@@ -81,7 +83,7 @@ export const masking_handler = (
 const SECRET_RULES: Array<readonly [RegExp, string]> = [
 	[/((?:\/\/[^\s:]+:)?_authToken\s*=\s*)\S+/gi, '$1[redacted]'],
 	[/(SECRET_[A-Z0-9_]+\s*[=:]\s*)\S+/g, '$1[redacted]'],
-	[/(npm_[A-Za-z0-9]{4})[A-Za-z0-9]{12,}/g, '$1[redacted]'],
+	[/(npm_[A-Za-z0-9]{4})[A-Za-z0-9]{12,}/g, '$1[redacted]']
 ];
 
 /** Redacts known secret shapes from a string. */

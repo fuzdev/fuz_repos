@@ -1,8 +1,8 @@
 <script lang="ts">
 	import DocsFooter from '@fuzdev/fuz_ui/DocsFooter.svelte';
-	import {site_context} from '@fuzdev/fuz_ui/site.svelte.ts';
+	import { site_context } from '@fuzdev/fuz_ui/site.svelte.ts';
 	import Card from '@fuzdev/fuz_ui/Card.svelte';
-	import {resolve} from '$app/paths';
+	import { resolve } from '$app/paths';
 
 	import MainHeader from './MainHeader.svelte';
 
@@ -10,7 +10,7 @@
 </script>
 
 <svelte:head>
-	<title>fuz_gitops</title>
+	<title>fuz_repos</title>
 </svelte:head>
 
 <main class="box mx_auto">
@@ -20,7 +20,10 @@
 	<section>
 		<menu class="unstyled">
 			<li>
-				<Card href={resolve('/docs')}>docs{#snippet icon()}{site.glyph}{/snippet}</Card>
+				<Card href={resolve('/docs')}>
+					docs
+					{#snippet icon()}{site.glyph}{/snippet}
+				</Card>
 			</li>
 			<li>
 				<Card href={resolve('/tree')} icon="">tree</Card>

@@ -1,37 +1,31 @@
-import type {Task} from '@fuzdev/gro';
-import {z} from 'zod';
-import {styleText as st} from 'node:util';
+import type { Task } from '@fuzdev/gro';
+import { z } from 'zod';
+import { styleText as st } from 'node:util';
 
-import {get_gitops_ready} from './gitops_task_helpers.ts';
-import {analyze_repos, type DependencyAnalysis} from './graph_validation.ts';
-import {
-	generate_publishing_plan,
-	log_publishing_plan,
-	type PublishingPlan,
-} from './publishing_plan.ts';
-import {execute_publishing_plan, type PublishingOptions} from './multi_repo_publisher.ts';
-import {log_dependency_analysis} from './log_helpers.ts';
-import {GITOPS_CONFIG_PATH_DEFAULT} from './gitops_constants.ts';
-import {reconcile_ci, repo_has_workflows} from './ci_reconcile.ts';
+import { get_gitops_ready, log_readiness_block } from './gitops_task_helpers.ts';
+import { analyze_repos } from './graph_validation.ts';
+import type { DependencyAnalysis } from './dependency_graph.ts';
+import { generate_publishing_plan, type PublishingPlan } from './publishing_plan.ts';
+import { log_publishing_plan } from './publishing_plan_logging.ts';
+import { execute_publishing_plan, type PublishingOptions } from './multi_repo_publisher.ts';
+import { log_dependency_analysis } from './log_helpers.ts';
+import { GITOPS_CONFIG_PATH_DEFAULT } from './gitops_constants.ts';
+import { reconcile_ci, repo_has_workflows } from './ci_reconcile.ts';
 
 /** @nodocs */
 export const Args = z.strictObject({
 	config: z
 		.string()
-		.meta({description: 'path to the gitops config file, absolute or relative to the cwd'})
+		.meta({ description: 'path to the gitops config file, absolute or relative to the cwd' })
 		.default(GITOPS_CONFIG_PATH_DEFAULT),
-	dir: z
+	registry: z
 		.string()
-		.meta({description: 'path containing the repos, defaults to the parent of the config dir'})
-		.optional(),
-	verbose: z.boolean().meta({description: 'show additional details'}).default(false),
-	sync: z
-		.boolean()
 		.meta({
 			description:
-				'sync repos (switch branch, pull, install) before validating instead of reading the working tree as-is',
+				'path to the repos.toml registry, when `repos` would not find it walking up from the cwd'
 		})
-		.default(false),
+		.optional(),
+	verbose: z.boolean().meta({ description: 'show additional details' }).default(false)
 });
 export type Args = z.infer<typeof Args>;
 
@@ -40,8 +34,8 @@ export const task: Task<Args> = {
 	Args,
 	summary:
 		'validate gitops configuration by running all read-only commands and checking for issues',
-	run: async ({args, log}) => {
-		const {config, dir, verbose, sync} = args;
+	run: async ({ args, log }) => {
+		const { config, registry, verbose } = args;
 
 		log.info(st('cyan', 'Running Gitops Validation Suite'));
 		log.info(st('dim', 'This runs all read-only commands and checks for consistency.'));
@@ -59,17 +53,18 @@ export const task: Task<Args> = {
 
 		const start_time = Date.now();
 
-		// Load repos once (shared by all commands); read the working tree as-is unless `--sync`
+		// Load repos once (shared by all commands), as they sit, and say which aren't at rest
 		log.info(st('dim', 'Loading repositories...'));
-		const {local_repos} = await get_gitops_ready({config, dir, download: false, sync, log});
+		const { local_repos } = await get_gitops_ready({ config, registry, log });
 		log.info(st('dim', `   Found ${local_repos.length} local repos`));
+		log_readiness_block(local_repos, log);
 
 		// 1. Run gitops_analyze
 		log.info(st('yellow', 'Running gitops_analyze...'));
 		const analyze_start = Date.now();
 		try {
 			// Build dependency graph and analyze cycles/wildcards (tolerating cycles)
-			const {analysis} = analyze_repos(local_repos);
+			const { analysis } = analyze_repos(local_repos);
 
 			const analyze_duration = Date.now() - analyze_start;
 
@@ -93,7 +88,7 @@ export const task: Task<Args> = {
 				duration: analyze_duration,
 				warning_details,
 				info_details,
-				analysis,
+				analysis
 			});
 
 			log.info(st('green', `  ✓ gitops_analyze completed in ${analyze_duration}ms`));
@@ -111,7 +106,7 @@ export const task: Task<Args> = {
 				success: false,
 				warnings: 0,
 				errors: 1,
-				duration: analyze_duration,
+				duration: analyze_duration
 			});
 			log.error(st('red', `  ✗ gitops_analyze failed: ${error}`));
 		}
@@ -121,7 +116,7 @@ export const task: Task<Args> = {
 		log.info(st('yellow', 'Running gitops_plan...'));
 		const plan_start = Date.now();
 		try {
-			const plan = await generate_publishing_plan(local_repos, {verbose});
+			const plan = await generate_publishing_plan(local_repos, { verbose });
 			publishing_plan = plan;
 			const plan_duration = Date.now() - plan_start;
 
@@ -133,12 +128,12 @@ export const task: Task<Args> = {
 				success: errors === 0,
 				warnings,
 				errors,
-				duration: plan_duration,
+				duration: plan_duration
 			});
 
 			log.info(st('green', `  ✓ gitops_plan completed in ${plan_duration}ms`));
 			if (verbose) {
-				log_publishing_plan(plan, log, {verbose});
+				log_publishing_plan(plan, log, { verbose });
 			}
 			if (warnings > 0) {
 				log.warn(st('yellow', `  ⚠️  Found ${warnings} warning(s)`));
@@ -153,7 +148,7 @@ export const task: Task<Args> = {
 				success: false,
 				warnings: 0,
 				errors: 1,
-				duration: plan_duration,
+				duration: plan_duration
 			});
 			log.error(st('red', `  ✗ gitops_plan failed: ${error}`));
 		}
@@ -164,14 +159,14 @@ export const task: Task<Args> = {
 		try {
 			const options: PublishingOptions = {
 				wetrun: false,
-				log: undefined, // Silent for validation
+				log: undefined // Silent for validation
 			};
 
 			// Reuse the plan from step 2 (regenerate only if that step failed to produce one).
 			const result = await execute_publishing_plan(
 				local_repos,
-				publishing_plan ?? (await generate_publishing_plan(local_repos, {verbose})),
-				options,
+				publishing_plan ?? (await generate_publishing_plan(local_repos, { verbose })),
+				options
 			);
 			const dry_duration = Date.now() - dry_start;
 
@@ -184,7 +179,7 @@ export const task: Task<Args> = {
 				success: result.ok,
 				warnings: 0,
 				errors,
-				duration: dry_duration,
+				duration: dry_duration
 			});
 
 			log.info(st('green', `  ✓ gitops_publish (dry run) completed in ${dry_duration}ms`));
@@ -198,40 +193,35 @@ export const task: Task<Args> = {
 				success: false,
 				warnings: 0,
 				errors: 1,
-				duration: dry_duration,
+				duration: dry_duration
 			});
 			log.error(st('red', `  ✗ gitops_publish (dry run) failed: ${error}`));
 		}
 
-		// 4. Reconcile each repo's declared `ci` against actual workflow files on disk.
+		// 4. Reconcile each repo's registry-declared `ci` against actual workflow files on disk.
 		log.info(st('yellow', 'Running ci_reconcile...'));
 		const ci_start = Date.now();
 		try {
 			const ci_drift = reconcile_ci(
 				local_repos.map((r) => ({
-					repo_url: r.repo_config.repo_url,
-					ci: r.repo_config.ci,
+					repo_url: r.entry.url,
+					ci: r.entry.ci,
 					has_workflows: repo_has_workflows(r.repo_dir),
-					// TODO: `local_repos` only ever holds checked-out repos — a missing repo
-					// throws in `local_repos_ensure` before we reach here — so `checkable` is
-					// always `true` today. The gate exists for a future caller that loads a
-					// partial set; until then the skip path is inert and untested.
-					checkable: true,
-					archived: r.repo_config.archived,
-				})),
+					archived: r.entry.archived
+				}))
 			);
 			const ci_duration = Date.now() - ci_start;
 			const drift_details = ci_drift.map((d) =>
 				d.kind === 'missing_ci'
 					? `${d.repo_url}: ci=true but no workflow files`
-					: `${d.repo_url}: ci=false but workflow files present`,
+					: `${d.repo_url}: ci=false but workflow files present`
 			);
 			results.push({
 				command: 'ci_reconcile',
 				success: ci_drift.length === 0,
 				warnings: 0,
 				errors: ci_drift.length,
-				duration: ci_duration,
+				duration: ci_duration
 			});
 			if (ci_drift.length === 0) {
 				log.info(st('green', `  ✓ ci_reconcile completed in ${ci_duration}ms`));
@@ -248,7 +238,7 @@ export const task: Task<Args> = {
 				success: false,
 				warnings: 0,
 				errors: 1,
-				duration: ci_duration,
+				duration: ci_duration
 			});
 			log.error(st('red', `  ✗ ci_reconcile failed: ${error}`));
 		}
@@ -295,7 +285,7 @@ export const task: Task<Args> = {
 			log.info(st('green', '✓ All validation checks passed'));
 			if (total_warnings > 0) {
 				log.warn(
-					st('yellow', `⚠️  Note: ${total_warnings} warning(s) found - review output above.`),
+					st('yellow', `⚠️  Note: ${total_warnings} warning(s) found - review output above.`)
 				);
 			}
 		} else {
@@ -305,5 +295,5 @@ export const task: Task<Args> = {
 			log.error(st('red', '❌ Validation failed - review the errors above.'));
 			throw new Error('Validation failed');
 		}
-	},
+	}
 };

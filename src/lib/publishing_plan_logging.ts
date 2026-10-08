@@ -6,18 +6,19 @@
  * @module
  */
 
-import type {Logger} from '@fuzdev/fuz_util/log.ts';
-import {styleText as st} from 'node:util';
+import type { Logger } from '@fuzdev/fuz_util/log.ts';
+import { styleText as st } from 'node:util';
 
-import type {
-	PublishingPlan,
-	VersionChange,
-	DependencyUpdate,
-	VerboseData,
-	VerboseChangesetDetail,
-	VerboseIteration,
-	VerbosePropagationChain,
-	VerboseGraphSummary,
+import {
+	version_change_kind,
+	type PublishingPlan,
+	type VersionChange,
+	type DependencyUpdate,
+	type VerboseData,
+	type VerboseChangesetDetail,
+	type VerboseIteration,
+	type VerbosePropagationChain,
+	type VerboseGraphSummary
 } from './publishing_plan.ts';
 
 export interface LogPlanOptions {
@@ -42,7 +43,7 @@ const log_section_header = (title: string, log: Logger): void => {
 const format_dep_diff = (dep_name: string, current: string, next: string): Array<string> => {
 	return [
 		st('red', `    - "${dep_name}": "${current}"`),
-		st('green', `    + "${dep_name}": "${next}"`),
+		st('green', `    + "${dep_name}": "${next}"`)
 	];
 };
 
@@ -51,7 +52,7 @@ const format_dep_diff = (dep_name: string, current: string, next: string): Array
  */
 const get_updates_for_package = (
 	pkg_name: string,
-	dependency_updates: Array<DependencyUpdate>,
+	dependency_updates: Array<DependencyUpdate>
 ): Map<string, Array<DependencyUpdate>> => {
 	const updates: Map<string, Array<DependencyUpdate>> = new Map();
 	for (const update of dependency_updates) {
@@ -73,37 +74,39 @@ const log_version_change_with_diffs = (
 	total: number,
 	dependency_updates: Array<DependencyUpdate>,
 	breaking_cascades: Map<string, Array<string>>,
-	log: Logger,
+	log: Logger
 ): void => {
 	const breaking_indicator = change.breaking ? st('red', ' BREAKING') : '';
 	const position = st('dim', `[${index + 1}/${total}]`);
 
+	const kind = version_change_kind(change);
+
 	// Determine scenario label
 	let scenario_label = '';
-	if (change.needs_bump_escalation) {
+	if (kind === 'escalation') {
 		scenario_label = st('yellow', ` [${change.existing_bump} → ${change.required_bump}]`);
-	} else if (change.will_generate_changeset) {
+	} else if (kind === 'auto') {
 		scenario_label = st('cyan', ' [auto-changeset]');
 	}
 
 	// Main version line
 	log.info(
 		`${position} ${change.package_name}: ${change.from} → ${st('green', change.to)} ` +
-			`(${change.bump_type})${scenario_label}${breaking_indicator}`,
+			`(${change.bump_type})${scenario_label}${breaking_indicator}`
 	);
 
 	// Show escalation reason
-	if (change.needs_bump_escalation) {
+	if (kind === 'escalation') {
 		log.info(
 			st(
 				'dim',
-				`      changesets specify ${change.existing_bump}, dependencies require ${change.required_bump}`,
-			),
+				`      changesets specify ${change.existing_bump}, dependencies require ${change.required_bump}`
+			)
 		);
 	}
 
 	// Show trigger reason for auto-changesets
-	if (change.will_generate_changeset) {
+	if (kind === 'auto') {
 		// Find what triggered this
 		const triggers: Array<string> = [];
 		for (const [pkg, affected] of breaking_cascades) {
@@ -138,7 +141,7 @@ const log_version_change_with_diffs = (
 export const log_publishing_plan = (
 	plan: PublishingPlan,
 	log: Logger,
-	options: LogPlanOptions = {},
+	options: LogPlanOptions = {}
 ): void => {
 	const {
 		publishing_order,
@@ -147,7 +150,8 @@ export const log_publishing_plan = (
 		breaking_cascades,
 		warnings,
 		info,
-		errors,
+		no_changes,
+		errors
 	} = plan;
 
 	// Errors first (blocking issues)
@@ -175,22 +179,22 @@ export const log_publishing_plan = (
 			return idx_a - idx_b;
 		});
 
-		// Separate into groups for headers
-		const with_changesets = ordered_changes.filter(
-			(vc) => vc.has_changesets && !vc.needs_bump_escalation,
+		// Separate into groups for headers; each change lands in exactly one
+		const with_changesets = ordered_changes.filter((vc) => version_change_kind(vc) === 'explicit');
+		const with_escalation = ordered_changes.filter(
+			(vc) => version_change_kind(vc) === 'escalation'
 		);
-		const with_escalation = ordered_changes.filter((vc) => vc.needs_bump_escalation);
-		const with_auto_changesets = ordered_changes.filter((vc) => vc.will_generate_changeset);
+		const with_auto_changesets = ordered_changes.filter((vc) => version_change_kind(vc) === 'auto');
 
 		// A single running counter across all groups so positions read 1..N with no
 		// gaps. (Numbering per-group index would make the first group skip the numbers
 		// that land in a later group, e.g. jump from `[9/12]` to `[11/12]`.)
-		const total = with_changesets.length + with_escalation.length + with_auto_changesets.length;
+		const total = ordered_changes.length;
 		let position = 0;
 		const log_change_group = (
 			title: string,
 			color: 'cyan' | 'yellow',
-			changes: Array<VersionChange>,
+			changes: Array<VersionChange>
 		): void => {
 			if (changes.length === 0) return;
 			log.info(st(color, title));
@@ -201,7 +205,7 @@ export const log_publishing_plan = (
 					total,
 					dependency_updates,
 					breaking_cascades,
-					log,
+					log
 				);
 			}
 			log.info('');
@@ -219,7 +223,7 @@ export const log_publishing_plan = (
 	const dep_only_packages: Set<string> = new Set();
 	for (const update of dependency_updates) {
 		const has_version_change = version_changes.some(
-			(vc) => vc.package_name === update.dependent_package,
+			(vc) => vc.package_name === update.dependent_package
 		);
 		if (!has_version_change) {
 			dep_only_packages.add(update.dependent_package);
@@ -251,15 +255,20 @@ export const log_publishing_plan = (
 		log.info('');
 	}
 
-	// Info (packages with no changes)
-	if (info.length > 0) {
-		log.info(st('dim', `No changes: ${info.join(', ')}`));
+	// Info sentences, then the packages with nothing to publish
+	for (const line of info) {
+		log.info(st('dim', line));
+	}
+	if (no_changes.length > 0) {
+		log.info(st('dim', `No changes: ${no_changes.join(', ')}`));
+	}
+	if (info.length > 0 || no_changes.length > 0) {
 		log.info('');
 	}
 
 	// Summary
 	const major_count = version_changes.filter((vc) => vc.breaking).length;
-	const auto_count = version_changes.filter((vc) => vc.will_generate_changeset).length;
+	const auto_count = version_changes.filter((vc) => version_change_kind(vc) === 'auto').length;
 	log.info(st('cyan', 'Summary:'));
 	log.info(`  ${version_changes.length} packages to publish`);
 	if (auto_count > 0) {
@@ -303,7 +312,7 @@ const log_verbose = (data: VerboseData, log: Logger): void => {
  */
 const log_verbose_changeset_details = (
 	details: Array<VerboseChangesetDetail>,
-	log: Logger,
+	log: Logger
 ): void => {
 	if (details.length === 0) return;
 
@@ -325,7 +334,7 @@ const log_verbose_changeset_details = (
 const log_verbose_iteration_details = (
 	iterations: Array<VerboseIteration>,
 	total: number,
-	log: Logger,
+	log: Logger
 ): void => {
 	if (iterations.length === 0) return;
 
@@ -389,7 +398,7 @@ const log_verbose_iteration_details = (
  */
 const log_verbose_propagation_chains = (
 	chains: Array<VerbosePropagationChain>,
-	log: Logger,
+	log: Logger
 ): void => {
 	if (chains.length === 0) return;
 
@@ -403,7 +412,7 @@ const log_verbose_propagation_chains = (
 			const indent = '   '.repeat(i);
 			const connector = '└─';
 			log.info(
-				st('dim', `${indent}${connector} ${item.pkg} (${item.dep_type} dep) → ${item.action}`),
+				st('dim', `${indent}${connector} ${item.pkg} (${item.dep_type} dep) → ${item.action}`)
 			);
 		}
 	}
@@ -419,8 +428,8 @@ const log_verbose_graph_summary = (summary: VerboseGraphSummary, log: Logger): v
 	log.info(
 		st(
 			'dim',
-			`${summary.package_count} packages, ${summary.internal_dep_count} internal dependencies`,
-		),
+			`${summary.package_count} packages, ${summary.internal_dep_count} internal dependencies`
+		)
 	);
 	log.info('');
 
@@ -446,7 +455,7 @@ const log_verbose_graph_summary = (summary: VerboseGraphSummary, log: Logger): v
 
 	log.info('');
 	log.info(
-		st('dim', `Cycles: ${summary.prod_cycle_count} production, ${summary.dev_cycle_count} dev`),
+		st('dim', `Cycles: ${summary.prod_cycle_count} production, ${summary.dev_cycle_count} dev`)
 	);
 	log.info('');
 };

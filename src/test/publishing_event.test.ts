@@ -1,6 +1,6 @@
 import { assert, test, describe } from 'vitest';
 
-import { summarize_events, type PublishingEvent } from '$lib/publishing_event.ts';
+import { summarize_events, type PublishingEvent } from '#lib/publishing_event.ts';
 import {
 	capture_handler,
 	multi_handler,
@@ -8,7 +8,7 @@ import {
 	stdout_handler,
 	redact_secrets,
 	mask_secrets
-} from '$lib/publishing_event_handler.ts';
+} from '#lib/publishing_event_handler.ts';
 
 const run_started: PublishingEvent = { event: 'run_started', wetrun: false, total: 3 };
 const completed: PublishingEvent = {

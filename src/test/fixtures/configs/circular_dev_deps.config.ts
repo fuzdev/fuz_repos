@@ -1,4 +1,4 @@
-import type { GitopsConfig } from '$lib/gitops_config.ts';
+import type { GitopsConfig } from '#lib/gitops_config.ts';
 
 // the registry keys of the `circular_dev_deps` fixture's repos
 const config: GitopsConfig = {

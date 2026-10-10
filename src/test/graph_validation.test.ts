@@ -1,6 +1,6 @@
 import { assert, describe, test } from 'vitest';
 
-import { analyze_repos, validate_dependency_graph } from '$lib/graph_validation.ts';
+import { analyze_repos, validate_dependency_graph } from '#lib/graph_validation.ts';
 import { create_mock_repo } from './test_helpers.ts';
 
 describe('validate_dependency_graph', () => {

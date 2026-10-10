@@ -1,7 +1,7 @@
 import { assert, describe, test } from 'vitest';
 
-import { check_gen_readiness, repo_readiness_for_gen } from '$lib/repo_readiness.ts';
-import { ReposStatusReport } from '$lib/repos_status.ts';
+import { check_gen_readiness, repo_readiness_for_gen } from '#lib/repo_readiness.ts';
+import { ReposStatusReport } from '#lib/repos_status.ts';
 import {
 	AT_REST,
 	create_mock_repos_entry,

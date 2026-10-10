@@ -1,7 +1,7 @@
 import { assert, describe, test } from 'vitest';
 
-import { local_repos_resolve } from '$lib/local_repo.ts';
-import { ReposStatusReport } from '$lib/repos_status.ts';
+import { local_repos_resolve } from '#lib/local_repo.ts';
+import { ReposStatusReport } from '#lib/repos_status.ts';
 import { create_mock_repos_entry, create_mock_repos_report, load_golden } from './test_helpers.ts';
 
 const load_report = (name: string): ReposStatusReport => ReposStatusReport.parse(load_golden(name));

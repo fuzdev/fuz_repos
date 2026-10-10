@@ -17,7 +17,7 @@
 
 	import Settings from './Settings.svelte';
 	import { repos_json } from './repos.ts';
-	import { Repo, type RepoJson, repos_parse, repos_context } from '$lib/repo.svelte.ts';
+	import { Repo, type RepoJson, repos_parse, repos_context } from '#lib/repo.svelte.ts';
 
 	const {
 		children

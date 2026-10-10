@@ -66,7 +66,7 @@ npm i -D @fuzdev/fuz_repos
   (with `"Public Repositories (read-only)"` selected)
   in either `process.env`, a project-local `.env`, or the parent directory at `../.env`
   (`gro gitops_sync` requires it, and you'll need to select options to support private repos)
-- re-export the gitops tasks by creating files in `$lib/`:
+- re-export the gitops tasks by creating files in `src/lib/`:
 
   ```ts
   // gitops_sync.task.ts

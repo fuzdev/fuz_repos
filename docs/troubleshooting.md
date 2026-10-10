@@ -98,7 +98,7 @@ run would refuse.
 It only warns on a branch behind or ahead of origin (the modules are the
 local tree's, the CI origin's tip — `repos sync` lines them up), on a failed
 fetch (the last fetch's view stands), and on an npm repo with no
-`node_modules` or no `.svelte-kit/tsconfig.json` its tsconfig extends: the
+`node_modules` or no `node_modules/$app/tsconfig.json` its tsconfig extends: the
 library analysis then reads external types as `any`, and `gitops_sync`
 installs nothing — run `npm install` and `gro sync` in that repo.
 
@@ -341,7 +341,7 @@ Gro prints `[<task>] invoking <task>` and `[<task>] → <task> …` before runni
 a task, out of the task's reach, so they lead stdout even under `--format json`
 or `--emit_json`. Everything after is the document or the events (the log goes
 to stderr). Write the report with `--outfile`, or skip the two lines
-(`tail -n +3` at the default log level). If `.svelte-kit` is missing, gro runs `svelte-kit sync` first, and
+(`tail -n +3` at the default log level). If `.svelte-kit` or SvelteKit's generated `node_modules/$app/tsconfig.json` is missing, gro runs `svelte-kit sync` first, and
 its output can land there too.
 
 ### Check what changed since last publish

@@ -1,16 +1,16 @@
 import { assert, test, describe } from 'vitest';
 
-import type { LocalRepo } from '$lib/local_repo.ts';
+import type { LocalRepo } from '#lib/local_repo.ts';
 import {
 	publish_repos,
 	execute_publishing_plan,
 	group_dependency_updates,
 	type PublishedVersion
-} from '$lib/multi_repo_publisher.ts';
-import type { DependencyUpdate, PublishingPlan, VersionChange } from '$lib/publishing_plan.ts';
-import { derive_publish_steps, type PublishStep } from '$lib/publish_steps.ts';
-import type { PublishingEvent } from '$lib/publishing_event.ts';
-import { capture_handler } from '$lib/publishing_event_handler.ts';
+} from '#lib/multi_repo_publisher.ts';
+import type { DependencyUpdate, PublishingPlan, VersionChange } from '#lib/publishing_plan.ts';
+import { derive_publish_steps, type PublishStep } from '#lib/publish_steps.ts';
+import type { PublishingEvent } from '#lib/publishing_event.ts';
+import { capture_handler } from '#lib/publishing_event_handler.ts';
 import {
 	create_mock_repo,
 	create_mock_gitops_ops,

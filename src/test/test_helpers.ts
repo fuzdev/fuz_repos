@@ -6,7 +6,7 @@ import type { PackageJson } from '@fuzdev/fuz_util/package_json.ts';
 import { Library } from '@fuzdev/fuz_ui/library.svelte.ts';
 import { Logger } from '@fuzdev/fuz_util/log.ts';
 
-import type { LocalRepo } from '$lib/local_repo.ts';
+import type { LocalRepo } from '#lib/local_repo.ts';
 import type {
 	GitopsOperations,
 	GitOperations,
@@ -16,14 +16,14 @@ import type {
 	ProcessOperations,
 	ReposCommandOutput,
 	ReposOperations
-} from '$lib/operations.ts';
-import type { RepoReadinessProblem } from '$lib/repo_readiness.ts';
+} from '#lib/operations.ts';
+import type { RepoReadinessProblem } from '#lib/repo_readiness.ts';
 import {
 	REPOS_STATUS_FORMAT_VERSION,
 	type ReposCheckout,
 	type ReposEntryStatus,
 	type ReposStatusReport
-} from '$lib/repos_status.ts';
+} from '#lib/repos_status.ts';
 
 /** A logger that records what reaches each stream, as Node's console routes it. */
 export type StreamLog = Logger & {

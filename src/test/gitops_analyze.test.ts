@@ -1,6 +1,6 @@
 import { assert, describe, test } from 'vitest';
 
-import { Args, run_gitops_analyze, type GitopsAnalyzeDeps } from '$lib/gitops_analyze.task.ts';
+import { Args, run_gitops_analyze, type GitopsAnalyzeDeps } from '#lib/gitops_analyze.task.ts';
 import { create_mock_repo, create_stream_log } from './test_helpers.ts';
 
 const create_deps = (): GitopsAnalyzeDeps => ({

@@ -1,5 +1,5 @@
 import { assert, describe, test } from 'vitest';
-import { DependencyGraph } from '$lib/dependency_graph.ts';
+import { DependencyGraph } from '#lib/dependency_graph.ts';
 import { create_mock_repo } from './test_helpers.ts';
 
 describe('DependencyGraph', () => {

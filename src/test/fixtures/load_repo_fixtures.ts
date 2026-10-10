@@ -5,7 +5,7 @@
 import type { LibraryJson } from '@fuzdev/fuz_util/library_json.ts';
 import { Library } from '@fuzdev/fuz_ui/library.svelte.ts';
 
-import type { LocalRepo } from '$lib/local_repo.ts';
+import type { LocalRepo } from '#lib/local_repo.ts';
 import { create_mock_repos_entry } from '../test_helpers.ts';
 import type { RepoFixtureSet, RepoFixtureData } from './repo_fixture_types.ts';
 

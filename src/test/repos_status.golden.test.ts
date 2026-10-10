@@ -8,7 +8,7 @@ import {
 	ReposStatusErrorBody,
 	ReposStatusErrorReport,
 	ReposStatusReport
-} from '$lib/repos_status.ts';
+} from '#lib/repos_status.ts';
 import { GOLDEN_DIR, load_golden } from './test_helpers.ts';
 
 type GoldenKind = 'report' | 'error' | 'sessions' | 'not_mirrored';

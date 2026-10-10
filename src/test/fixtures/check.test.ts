@@ -3,13 +3,13 @@ import { existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { validate_dependency_graph } from '$lib/graph_validation.ts';
-import { generate_publishing_plan } from '$lib/publishing_plan.ts';
-import { load_gitops_config } from '$lib/gitops_config.ts';
-import { publish_repos } from '$lib/multi_repo_publisher.ts';
+import { validate_dependency_graph } from '#lib/graph_validation.ts';
+import { generate_publishing_plan } from '#lib/publishing_plan.ts';
+import { load_gitops_config } from '#lib/gitops_config.ts';
+import { publish_repos } from '#lib/multi_repo_publisher.ts';
 import { create_fixture_gitops_ops } from './mock_operations.ts';
 import { fixture_to_local_repos } from './load_repo_fixtures.ts';
-import type { LocalRepo } from '$lib/local_repo.ts';
+import type { LocalRepo } from '#lib/local_repo.ts';
 import { basic_publishing } from './repo_fixtures/basic_publishing.ts';
 import { deep_cascade } from './repo_fixtures/deep_cascade.ts';
 import { circular_dev_deps } from './repo_fixtures/circular_dev_deps.ts';

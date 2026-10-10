@@ -44,7 +44,10 @@ export const Args = z.strictObject({
 		.optional(),
 	outdir: z
 		.string()
-		.meta({ description: 'path to the directory for the generated files, defaults to $routes/' })
+		.meta({
+			description:
+				'path to the directory for the generated files, defaults to the SvelteKit routes directory'
+		})
 		.optional(),
 	check: z
 		.boolean()
@@ -112,7 +115,7 @@ export const task: Task<Args> = {
 		// TODO should package_json be provided in the Gro task/gen contexts? check if it's always loaded
 		const repo_specifier =
 			package_json.name === '@fuzdev/fuz_repos'
-				? '$lib/repo.svelte.ts'
+				? '#lib/repo.svelte.ts'
 				: '@fuzdev/fuz_repos/repo.svelte.ts';
 
 		log.info(`generating ${outfile_json} and ${outfile_ts}`);
@@ -235,8 +238,9 @@ const default_gitops_sync_deps: GitopsSyncDeps = {
  *    again, warning on a followed branch not in sync with origin and a
  *    failed fetch
  * 5. warns on each npm repo the library analysis can't fully read: no
- *    `node_modules`, or no `.svelte-kit/tsconfig.json` when its tsconfig
- *    extends it (external types then read as `any`) — it installs nothing
+ *    `node_modules`, or no `node_modules/$app/tsconfig.json` when its tsconfig
+ *    extends `$app/tsconfig` (external types then read as `any`) — it installs
+ *    nothing
  * 6. loads each repo's library as it sits
  *
  * @returns the loaded repos and the token, or `null` when `check` passed
@@ -330,8 +334,10 @@ const log_gen_warnings = (warnings: Array<string>, log: Logger): void => {
 
 /**
  * What an npm repo lacks for the library analysis to resolve its dependencies'
- * types: `node_modules`, and `.svelte-kit/tsconfig.json` when its
- * `tsconfig.json` extends it. Empty for a repo without a `package.json`.
+ * types: `node_modules`, or, when its `tsconfig.json` extends `$app/tsconfig`,
+ * SvelteKit's generated `node_modules/$app/tsconfig.json` (written by
+ * `svelte-kit sync`). The second lives inside the first, so a repo without
+ * `node_modules` reports only that. Empty for a repo without a `package.json`.
  */
 const analysis_setup_gaps = (
 	repo_dir: string,
@@ -339,16 +345,15 @@ const analysis_setup_gaps = (
 	read_file: (path: string) => string
 ): Array<string> => {
 	if (!exists(join(repo_dir, 'package.json'))) return [];
-	const missing: Array<string> = [];
-	if (!exists(join(repo_dir, 'node_modules'))) missing.push('`node_modules`');
+	if (!exists(join(repo_dir, 'node_modules'))) return ['`node_modules`'];
 	const tsconfig_path = join(repo_dir, 'tsconfig.json');
-	const svelte_kit_tsconfig = '.svelte-kit/tsconfig.json';
+	const kit_tsconfig = 'node_modules/$app/tsconfig.json';
 	if (
 		exists(tsconfig_path) &&
-		read_file(tsconfig_path).includes(svelte_kit_tsconfig) &&
-		!exists(join(repo_dir, svelte_kit_tsconfig))
+		read_file(tsconfig_path).includes('$app/tsconfig') &&
+		!exists(join(repo_dir, kit_tsconfig))
 	) {
-		missing.push(`\`${svelte_kit_tsconfig}\``);
+		return [`\`${kit_tsconfig}\``];
 	}
-	return missing;
+	return [];
 };

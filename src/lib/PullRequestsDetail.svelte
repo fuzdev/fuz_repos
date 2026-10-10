@@ -30,7 +30,7 @@
 				{#each pull_requests as { repo, pull_request } (`${repo.name}#${pull_request.number}`)}
 					<tr>
 						<td>
-							<a href={resolve(`/tree/${repo.repo_name}`)}>
+							<a href={resolve('/tree/[slug]', { slug: repo.repo_name })}>
 								{repo.repo_name}{#if repo.package_json.glyph}
 									&nbsp;{repo.package_json.glyph}
 								{/if}

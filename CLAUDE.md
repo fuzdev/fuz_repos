@@ -389,7 +389,7 @@ a branch, pulls, or installs:
    (behind: CI is origin's tip, the modules the local tree) and a failed
    fetch (the last fetch's view stands)
 5. Warns on each npm repo the library analysis can't fully read — no
-   `node_modules`, or no `.svelte-kit/tsconfig.json` its tsconfig extends
+   `node_modules`, or no `node_modules/$app/tsconfig.json` its tsconfig extends
    (external types then read as `any`); it installs nothing
 6. Loads each repo's library, fetches GitHub data (CI, PRs), and writes
    `repos.json` + `repos.ts` (running `gro gen` when `repos.json` changed),
@@ -759,7 +759,7 @@ For packages you control, use `>=` instead of `^` for peer dependencies:
 "peerDependencies": {
   "@fuzdev/fuz_util": ">=0.38.0", // controlled package - use >=
   "@fuzdev/gro": ">=0.174.0",   // controlled package - use >=
-  "@sveltejs/kit": "^2",          // third-party - use ^
+  "@sveltejs/kit": "^3",          // third-party - use ^
   "svelte": "^5"                  // third-party - use ^
 }
 ```

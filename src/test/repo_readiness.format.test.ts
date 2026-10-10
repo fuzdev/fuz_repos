@@ -4,7 +4,7 @@ import {
 	format_readiness_ahead,
 	format_readiness_block,
 	repos_not_at_rest
-} from '$lib/repo_readiness.ts';
+} from '#lib/repo_readiness.ts';
 import { AT_REST, create_mock_repos_entry, entry_with } from './test_helpers.ts';
 
 describe('format_readiness_ahead', () => {

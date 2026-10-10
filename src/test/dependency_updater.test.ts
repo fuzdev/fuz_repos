@@ -5,10 +5,10 @@ import {
 	update_package_json,
 	update_all_repos,
 	find_updates_needed
-} from '$lib/dependency_updater.ts';
+} from '#lib/dependency_updater.ts';
 import { create_mock_repo, create_mock_git_ops, create_mock_fs_ops } from './test_helpers.ts';
-import type { GitOperations } from '$lib/operations.ts';
-import type { PublishedVersion } from '$lib/multi_repo_publisher.ts';
+import type { GitOperations } from '#lib/operations.ts';
+import type { PublishedVersion } from '#lib/multi_repo_publisher.ts';
 
 /**
  * Creates mock git operations that track calls

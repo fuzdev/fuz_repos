@@ -5,8 +5,8 @@ import {
 	format_repo_readiness_problem,
 	repo_readiness_at_rest,
 	repo_readiness_for_publish
-} from '$lib/repo_readiness.ts';
-import { ReposSessions, ReposStatusReport, type ReposEntryStatus } from '$lib/repos_status.ts';
+} from '#lib/repo_readiness.ts';
+import { ReposSessions, ReposStatusReport, type ReposEntryStatus } from '#lib/repos_status.ts';
 import {
 	AT_REST,
 	create_mock_repos_entry,

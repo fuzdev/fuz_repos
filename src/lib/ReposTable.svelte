@@ -69,7 +69,9 @@
 			<tr>
 				<td>
 					<div class="row">
-						<a href={resolve(`/tree/${repo.repo_name}`)}>{package_json.glyph ?? '🌳'}</a>
+						<a href={resolve('/tree/[slug]', { slug: repo.repo_name })}>
+							{package_json.glyph ?? '🌳'}
+						</a>
 					</div>
 				</td>
 				<td>

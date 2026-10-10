@@ -1,7 +1,7 @@
 import { assert, describe, test } from 'vitest';
 import { assert_rejects } from '@fuzdev/fuz_util/testing.ts';
 
-import { gate_publish_readiness } from '$lib/gitops_task_helpers.ts';
+import { gate_publish_readiness } from '#lib/gitops_task_helpers.ts';
 import {
 	create_gate_repos,
 	create_mock_repo,

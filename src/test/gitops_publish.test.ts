@@ -8,9 +8,9 @@ import {
 	run_gitops_publish,
 	to_child_stdout,
 	type GitopsPublishDeps
-} from '$lib/gitops_publish.task.ts';
-import type { LocalRepo } from '$lib/local_repo.ts';
-import type { ReposEntryStatus } from '$lib/repos_status.ts';
+} from '#lib/gitops_publish.task.ts';
+import type { LocalRepo } from '#lib/local_repo.ts';
+import type { ReposEntryStatus } from '#lib/repos_status.ts';
 import {
 	AT_REST,
 	create_gate_repos,

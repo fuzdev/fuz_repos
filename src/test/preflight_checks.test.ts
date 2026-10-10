@@ -1,15 +1,15 @@
 import { assert, describe, test } from 'vitest';
 
-import { run_preflight_checks } from '$lib/preflight_checks.ts';
-import type { VersionChange } from '$lib/publishing_plan.ts';
+import { run_preflight_checks } from '#lib/preflight_checks.ts';
+import type { VersionChange } from '#lib/publishing_plan.ts';
 import {
 	create_mock_build_ops,
 	create_mock_npm_ops,
 	create_mock_repo,
 	entry_with
 } from './test_helpers.ts';
-import type { LocalRepo } from '$lib/local_repo.ts';
-import type { BuildOperations } from '$lib/operations.ts';
+import type { LocalRepo } from '#lib/local_repo.ts';
+import type { BuildOperations } from '#lib/operations.ts';
 
 const change = (package_name: string, has_changesets = true): VersionChange => ({
 	package_name,

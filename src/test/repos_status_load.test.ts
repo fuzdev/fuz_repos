@@ -6,8 +6,8 @@ import {
 	load_repos_status,
 	parse_repos_status_output,
 	to_repos_command
-} from '$lib/repos_status_load.ts';
-import { REPOS_STATUS_FORMAT_VERSION, ReposStatusErrorReport } from '$lib/repos_status.ts';
+} from '#lib/repos_status_load.ts';
+import { REPOS_STATUS_FORMAT_VERSION, ReposStatusErrorReport } from '#lib/repos_status.ts';
 import { GOLDEN_DIR, create_mock_repos_ops, load_golden, read_golden } from './test_helpers.ts';
 
 const ERROR_GOLDENS = readdirSync(GOLDEN_DIR)

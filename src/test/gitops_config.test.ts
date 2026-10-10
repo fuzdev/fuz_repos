@@ -7,7 +7,7 @@ import {
 	gitops_config_leaked_private_repos,
 	load_gitops_config,
 	parse_gitops_config
-} from '$lib/gitops_config.ts';
+} from '#lib/gitops_config.ts';
 import { create_mock_repos_entry } from './test_helpers.ts';
 
 const CONFIG_PATH = '/test/gitops.config.ts';

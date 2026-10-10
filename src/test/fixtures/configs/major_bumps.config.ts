@@ -1,4 +1,4 @@
-import type { GitopsConfig } from '$lib/gitops_config.ts';
+import type { GitopsConfig } from '#lib/gitops_config.ts';
 
 // the registry keys of the `major_bumps` fixture's repos
 const config: GitopsConfig = {

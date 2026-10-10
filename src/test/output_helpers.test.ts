@@ -1,6 +1,6 @@
 import { assert, describe, test } from 'vitest';
 
-import { format_and_output, output_is_machine, route_human_output } from '$lib/output_helpers.ts';
+import { format_and_output, output_is_machine, route_human_output } from '#lib/output_helpers.ts';
 import { create_stream_log } from './test_helpers.ts';
 
 describe('output_is_machine', () => {

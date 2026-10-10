@@ -6,7 +6,7 @@ import {
 	default_process_operations,
 	output_tail,
 	OUTPUT_TAIL_MAX_LINES
-} from '$lib/operations_defaults.ts';
+} from '#lib/operations_defaults.ts';
 
 // `spawn_out` is mocked for `npm ping`; `run_interactive` spawns real `node` children
 vi.mock('@fuzdev/fuz_util/process.ts', async (import_original) => {

@@ -3,8 +3,8 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { Args, run_gitops_plan, type GitopsPlanDeps } from '$lib/gitops_plan.task.ts';
-import type { LocalRepo } from '$lib/local_repo.ts';
+import { Args, run_gitops_plan, type GitopsPlanDeps } from '#lib/gitops_plan.task.ts';
+import type { LocalRepo } from '#lib/local_repo.ts';
 import {
 	create_mock_gitops_ops,
 	create_mock_repo,

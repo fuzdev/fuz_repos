@@ -1,6 +1,6 @@
 import { describe, test, assert } from 'vitest';
 
-import { generate_publishing_plan, type PublishingPlan } from '$lib/publishing_plan.ts';
+import { generate_publishing_plan, type PublishingPlan } from '#lib/publishing_plan.ts';
 import { basic_publishing } from './repo_fixtures/basic_publishing.ts';
 import { deep_cascade } from './repo_fixtures/deep_cascade.ts';
 import { circular_dev_deps } from './repo_fixtures/circular_dev_deps.ts';

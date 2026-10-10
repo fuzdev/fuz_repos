@@ -1,6 +1,6 @@
 <script lang="ts">
-	import PullRequestsPage from '$lib/PullRequestsPage.svelte';
-	import { repos_context } from '$lib/repo.svelte.ts';
+	import PullRequestsPage from '#lib/PullRequestsPage.svelte';
+	import { repos_context } from '#lib/repo.svelte.ts';
 
 	const { repo, repos } = repos_context.get();
 </script>

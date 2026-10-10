@@ -1,7 +1,7 @@
 import { assert, describe, test } from 'vitest';
 
-import { fetch_repo_data } from '$lib/fetch_repo_data.ts';
-import type { LocalRepo } from '$lib/local_repo.ts';
+import { fetch_repo_data } from '#lib/fetch_repo_data.ts';
+import type { LocalRepo } from '#lib/local_repo.ts';
 import { create_mock_repo, create_mock_repos_entry, create_stream_log } from './test_helpers.ts';
 
 const json_response = (body: unknown, status = 200): Response =>
@@ -25,7 +25,7 @@ const create_fetch = (
 		if (typeof runs === 'number') return json_response({ message: 'nope' }, runs);
 		return json_response({ total_count: runs.length, check_runs: runs });
 	};
-	return Object.assign(fetch, { urls }) as typeof globalThis.fetch & { urls: Array<string> };
+	return Object.assign<typeof globalThis.fetch, { urls: Array<string> }>(fetch, { urls });
 };
 
 const create_repo = (name: string, ci = true): LocalRepo => {

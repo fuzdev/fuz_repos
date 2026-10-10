@@ -8,11 +8,11 @@ import {
 	prepare_gitops_sync,
 	serialize_repos_json,
 	type GitopsSyncDeps
-} from '$lib/gitops_sync.task.ts';
-import { fetch_repo_data } from '$lib/fetch_repo_data.ts';
-import { GithubPullRequests } from '$lib/github.ts';
-import type { RepoJson } from '$lib/repo.svelte.ts';
-import type { ReposEntryStatus } from '$lib/repos_status.ts';
+} from '#lib/gitops_sync.task.ts';
+import { fetch_repo_data } from '#lib/fetch_repo_data.ts';
+import { GithubPullRequests } from '#lib/github.ts';
+import type { RepoJson } from '#lib/repo.svelte.ts';
+import type { ReposEntryStatus } from '#lib/repos_status.ts';
 import { basic_publishing } from './fixtures/repo_fixtures/basic_publishing.ts';
 import {
 	AT_REST,
@@ -201,11 +201,12 @@ describe('prepare_gitops_sync', () => {
 
 	test('warns on each npm repo the analysis can not fully read', async () => {
 		const { deps } = create_recording_deps({
-			missing: ['/test/repo_a/node_modules', '/test/repo_b/.svelte-kit/tsconfig.json'],
+			missing: ['/test/repo_a/node_modules', '/test/repo_b/node_modules/$app/tsconfig.json'],
 			files: {
-				'/test/repo_b/tsconfig.json': '{"extends": "./.svelte-kit/tsconfig.json"}',
-				'/test/repo_c/tsconfig.json': '{"extends": "./.svelte-kit/tsconfig.json"}',
-				'/test/repo_c/.svelte-kit/tsconfig.json': '{}',
+				'/test/repo_a/tsconfig.json': '{"extends": "$app/tsconfig"}',
+				'/test/repo_b/tsconfig.json': '{"extends": "$app/tsconfig"}',
+				'/test/repo_c/tsconfig.json': '{"extends": "$app/tsconfig"}',
+				'/test/repo_c/node_modules/$app/tsconfig.json': '{}',
 				'/test/repo_d/tsconfig.json': '{"compilerOptions": {}}'
 			}
 		});
@@ -216,7 +217,7 @@ describe('prepare_gitops_sync', () => {
 			.map((w) => w.replace(/^.*\[test\] /, ''));
 		assert.deepEqual(gaps, [
 			'  repo_a: no `node_modules`',
-			'  repo_b: no `.svelte-kit/tsconfig.json`'
+			'  repo_b: no `node_modules/$app/tsconfig.json`'
 		]);
 	});
 

@@ -6,7 +6,7 @@ import {
 	wait_for_package,
 	type NpmRegistryDeps,
 	type WaitOptions
-} from '$lib/npm_registry.ts';
+} from '#lib/npm_registry.ts';
 
 interface FakeRegistry {
 	deps: NpmRegistryDeps;

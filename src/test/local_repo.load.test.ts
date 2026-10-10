@@ -9,7 +9,7 @@ import {
 	local_repos_load,
 	repo_is_npm,
 	type LocalRepoPath
-} from '$lib/local_repo.ts';
+} from '#lib/local_repo.ts';
 import { create_mock_repos_entry } from './test_helpers.ts';
 
 /** Builds a `LocalRepoPath` pointing at a real temp dir for the cargo divert tests. */

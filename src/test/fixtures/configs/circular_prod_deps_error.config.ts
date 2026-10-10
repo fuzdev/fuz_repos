@@ -1,4 +1,4 @@
-import type { GitopsConfig } from '$lib/gitops_config.ts';
+import type { GitopsConfig } from '#lib/gitops_config.ts';
 
 // the registry keys of the `circular_prod_deps_error` fixture's repos
 const config: GitopsConfig = {

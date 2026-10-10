@@ -1,12 +1,12 @@
 import { assert, test } from 'vitest';
 
-import type { LocalRepo } from '$lib/local_repo.ts';
-import { generate_publishing_plan, version_change_kind } from '$lib/publishing_plan.ts';
-import { log_publishing_plan } from '$lib/publishing_plan_logging.ts';
-import { derive_publish_steps } from '$lib/publish_steps.ts';
-import type { ChangesetOperations } from '$lib/operations.ts';
-import { parse_changeset_content } from '$lib/changeset_reader.ts';
-import { GITOPS_MAX_ITERATIONS_DEFAULT } from '$lib/gitops_constants.ts';
+import type { LocalRepo } from '#lib/local_repo.ts';
+import { generate_publishing_plan, version_change_kind } from '#lib/publishing_plan.ts';
+import { log_publishing_plan } from '#lib/publishing_plan_logging.ts';
+import { derive_publish_steps } from '#lib/publish_steps.ts';
+import type { ChangesetOperations } from '#lib/operations.ts';
+import { parse_changeset_content } from '#lib/changeset_reader.ts';
+import { GITOPS_MAX_ITERATIONS_DEFAULT } from '#lib/gitops_constants.ts';
 import { create_mock_repo, create_stream_log } from './test_helpers.ts';
 
 test('detects breaking change cascades', async () => {

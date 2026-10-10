@@ -46,7 +46,7 @@
 			<li class="repo-module">
 				<header class="width:100% position:relative">
 					<a href="#{repo.name}" id={repo.name} class="subtitle">🔗</a>
-					<a href={resolve(`/tree/${repo.repo_name}`)}>{repo.name}</a>
+					<a href={resolve('/tree/[slug]', { slug: repo.repo_name })}>{repo.name}</a>
 				</header>
 				<ul class="modules panel unstyled">
 					{#each modules as repo_module (repo_module)}

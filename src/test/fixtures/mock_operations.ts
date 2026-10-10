@@ -1,4 +1,4 @@
-import type { GitopsOperations } from '$lib/operations.ts';
+import type { GitopsOperations } from '#lib/operations.ts';
 import type { RepoFixtureSet } from './repo_fixture_types.ts';
 import { create_fixture_changeset_ops } from './mock_changeset_operations.ts';
 import { create_mock_fs_ops, create_mock_gitops_ops } from '../test_helpers.ts';

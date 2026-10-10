@@ -40,7 +40,9 @@
 				<li class="panel p_md box">
 					<LibrarySummary library={repo.library}>
 						{#snippet repo_name(repo_name)}
-							<a href={resolve(`/tree/${repo_name}`)} class="repo-name">{repo_name}</a>
+							<a href={resolve('/tree/[slug]', { slug: repo_name })} class="repo-name">
+								{repo_name}
+							</a>
 						{/snippet}
 					</LibrarySummary>
 				</li>

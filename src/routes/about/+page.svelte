@@ -3,10 +3,10 @@
 	import EcosystemLinksPanel from '@fuzdev/fuz_ui/EcosystemLinksPanel.svelte';
 	import { Library, library_context } from '@fuzdev/fuz_ui/library.svelte.ts';
 	import { site_context } from '@fuzdev/fuz_ui/site.svelte.ts';
-	import { library_json } from '$routes/library.ts';
+	import { library_json } from '#routes/library.ts';
 
-	import PageFooter from '$lib/PageFooter.svelte';
-	import PageHeader from '$lib/PageHeader.svelte';
+	import PageFooter from '#lib/PageFooter.svelte';
+	import PageHeader from '#lib/PageHeader.svelte';
 
 	const library = new Library(library_json);
 	library_context.set(() => library);

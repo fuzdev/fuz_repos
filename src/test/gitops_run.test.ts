@@ -10,7 +10,7 @@ import {
 	type GitopsRunCommandOutput,
 	type GitopsRunDeps,
 	type GitopsRunResult
-} from '$lib/gitops_run.task.ts';
+} from '#lib/gitops_run.task.ts';
 import {
 	create_mock_repos_entry,
 	create_ready_repos_ops,

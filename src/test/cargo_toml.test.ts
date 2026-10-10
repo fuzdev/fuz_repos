@@ -1,6 +1,6 @@
 import { assert, describe, test } from 'vitest';
 
-import { cargo_toml_parse } from '$lib/cargo_toml.ts';
+import { cargo_toml_parse } from '#lib/cargo_toml.ts';
 
 describe('cargo_toml_parse', () => {
 	test('reads identity from a workspace root `[workspace.package]`', () => {

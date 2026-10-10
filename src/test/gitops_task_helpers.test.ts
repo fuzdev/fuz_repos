@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { resolve_gitops_repos } from '$lib/gitops_task_helpers.ts';
+import { resolve_gitops_repos } from '#lib/gitops_task_helpers.ts';
 import { basic_publishing } from './fixtures/repo_fixtures/basic_publishing.ts';
 import {
 	create_mock_repos_entry,

@@ -20,22 +20,19 @@
 	<section>
 		<menu class="unstyled">
 			<li>
-				<Card href={resolve('/docs')}>
-					docs
-					{#snippet icon()}{site.glyph}{/snippet}
-				</Card>
+				<Card href={resolve('/docs')} icon={site.glyph}>docs</Card>
 			</li>
 			<li>
-				<Card href={resolve('/tree')} icon="">tree</Card>
+				<Card href={resolve('/tree')}>tree</Card>
 			</li>
 			<li>
-				<Card href={resolve('/table')} icon="">table</Card>
+				<Card href={resolve('/table')}>table</Card>
 			</li>
 			<li>
-				<Card href={resolve('/modules')} icon="">modules</Card>
+				<Card href={resolve('/modules')}>modules</Card>
 			</li>
 			<li>
-				<Card href={resolve('/pull_requests')} icon="">pull requests</Card>
+				<Card href={resolve('/pull_requests')}>pull requests</Card>
 			</li>
 		</menu>
 	</section>

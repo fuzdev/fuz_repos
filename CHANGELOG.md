@@ -1,5 +1,20 @@
 # @fuzdev/fuz_repos
 
+## 0.83.0
+
+### Minor Changes
+
+- **breaking** perf: `gitops_analyze`, `gitops_plan`, `gitops_publish`, and `gitops_validate` read each npm repo's `package.json` alone, without the svelte-docinfo module analysis they never read, so loading them is faster, needs no `node_modules`, and writes no `.gro/library.json` (a `--wetrun` still builds each repo); `gitops_sync` still analyzes, for the dashboard ([d641959](https://github.com/fuzdev/fuz_repos/commit/d641959))
+
+  - `local_repo_load` and `local_repos_load` take a required `modules: boolean` (`LocalRepoLoadOptions`): `true` runs gro's `library_load_from_repo`, `false` builds the `Library` from the `package.json` with no modules
+  - `GitopsSyncDeps.load_repos` receives `modules`
+
+- **breaking** fix: `gitops_sync` refuses, before any network, an npm repo with no `node_modules` or with no `node_modules/$app/tsconfig.json` its tsconfig extends, rather than warning and caching a library analysis that reads external types as `any` ([8df0939](https://github.com/fuzdev/fuz_repos/commit/8df0939))
+
+  - gro can cache the analysis at `.gro/library.json` keyed on the repo's commit, so the degraded library could outlive `npm install` and `gro sync` until the next commit; each refusal line names the repo, what it lacks, and the fix (`npm install`, `gro sync`, or both, in that repo)
+  - `--check` reports it and exits non-zero; `--allow_dirty` doesn't reach it
+  - a `.gro/library.json` already cached without the dependencies stays at its commit — delete it to re-analyze
+
 ## 0.82.0
 
 ### Minor Changes

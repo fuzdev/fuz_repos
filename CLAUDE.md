@@ -208,8 +208,9 @@ visibility, `ci`, and `archived` come from the registry, and the TS side
 clones nothing. Readiness is read from the report too: a real publish
 gates on each npm repo's `at_rest` facts after a `--fetch`, and the
 diagnostics report the repos not at rest, and `gitops_sync` refuses to
-generate the dashboard's data from a repo off its branch, dirty, or
-mid-operation. No TS task switches a branch, pulls, or installs: moving
+generate the dashboard's data from a repo off its branch, dirty,
+mid-operation, or without the installed dependencies its library analysis
+reads. No TS task switches a branch, pulls, or installs: moving
 repos is `repos sync`'s, and installing dependencies is out of scope.
 
 ## Core functionality
@@ -381,17 +382,20 @@ a branch, pulls, or installs:
    (untracked files count), or mid-operation, naming each with its fix
    (`check_gen_readiness`): the site would show that tree's modules beside
    origin's CI. `--allow_dirty` reads such repos as they sit, warning instead.
-   `--check` stops here: it logs the report and exits non-zero when a real
-   run would refuse — no fetch, no token, nothing written
+   It also refuses each npm repo the library analysis can't fully read — no
+   `node_modules`, or no `node_modules/$app/tsconfig.json` its tsconfig
+   extends — naming the fix (`npm install`, `gro sync`, or both, in that
+   repo): external types would read as `any`, and gro can cache the analysis at
+   `.gro/library.json` keyed on the commit, so the degraded library can
+   outlive the fix. `--allow_dirty` doesn't reach this refusal. `--check`
+   stops here: it logs the report and exits non-zero when a real run would
+   refuse — no fetch, no token, nothing written
 3. Reads `SECRET_GITHUB_API_TOKEN`
 4. Fetches the repos from origin (`repos status <keys…> --fetch --json`) and
    checks them again, warning on a followed branch not in sync with origin
    (behind: CI is origin's tip, the modules the local tree) and a failed
    fetch (the last fetch's view stands)
-5. Warns on each npm repo the library analysis can't fully read — no
-   `node_modules`, or no `node_modules/$app/tsconfig.json` its tsconfig extends
-   (external types then read as `any`); it installs nothing
-6. Loads each repo's library, fetches GitHub data (CI, PRs), and writes
+5. Loads each repo's library, fetches GitHub data (CI, PRs), and writes
    `repos.json` + `repos.ts` (running `gro gen` when `repos.json` changed),
    then updates the fetch cache
 
@@ -662,7 +666,7 @@ npm i -D @fuzdev/fuz_repos
 
 # Dashboard data (reads each repo as it sits; `repos sync` moves them)
 gro gitops_sync               # fetch, check each repo is ready, then write repos.json + repos.ts from GitHub and library data
-gro gitops_sync --check       # the readiness report alone, from local refs: no fetch, no token, nothing written; non-zero when a run would refuse
+gro gitops_sync --check       # the readiness report alone, from local refs and installed dependencies: no fetch, no token, nothing written; non-zero when a run would refuse
 gro gitops_sync --allow_dirty # read repos off their branch, dirty, or mid-operation as they sit, warning instead of refusing
 gro gitops_sync --outdir <dir> # write the data somewhere other than the routes dir
 gro gitops_sync --registry ../repos.toml # every task takes a registry repos wouldn't find from the cwd

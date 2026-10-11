@@ -96,11 +96,27 @@ the same report from local refs, without a token, and exits non-zero when a
 run would refuse.
 
 It only warns on a branch behind or ahead of origin (the modules are the
-local tree's, the CI origin's tip — `repos sync` lines them up), on a failed
-fetch (the last fetch's view stands), and on an npm repo with no
-`node_modules` or no `node_modules/$app/tsconfig.json` its tsconfig extends: the
-library analysis then reads external types as `any`, and `gitops_sync`
-installs nothing — run `npm install` and `gro sync` in that repo.
+local tree's, the CI origin's tip — `repos sync` lines them up) and on a failed
+fetch (the last fetch's view stands).
+
+### "not generating the site data: … dependencies installed"
+
+`gro gitops_sync` also refuses, before any fetch, an npm repo with no
+`node_modules`, or with no `node_modules/$app/tsconfig.json` when its tsconfig
+extends `$app/tsconfig`: the library analysis would read the repo's external
+types as `any`, and gro can cache the analysis at `.gro/library.json` keyed on
+the repo's commit, so that degraded library can stay until the next commit.
+Each line names the repo, what it lacks, and the fix — `npm install`,
+`gro sync` (which runs `svelte-kit sync`), or both, in that repo; `gitops_sync`
+installs nothing, and `--allow_dirty` doesn't reach this refusal.
+`gro gitops_sync --check` reports it too.
+
+The other tasks (`gitops_analyze`, `gitops_plan`, `gitops_publish`,
+`gitops_validate`) load libraries through the same cache without this check,
+so one run in a repo missing its dependencies can cache a degraded library
+that a later `gitops_sync` reads at that commit. If the dashboard shows `any`
+for a repo whose dependencies are installed, delete its `.gro/library.json`
+and run `gro gitops_sync` again.
 
 ### "npm authentication failed"
 

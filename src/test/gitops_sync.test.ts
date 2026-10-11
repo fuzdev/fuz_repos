@@ -199,9 +199,13 @@ describe('prepare_gitops_sync', () => {
 		assert.deepEqual(steps, ['repos status', 'token']);
 	});
 
-	test('warns on each npm repo the analysis can not fully read', async () => {
-		const { deps } = create_recording_deps({
-			missing: ['/test/repo_a/node_modules', '/test/repo_b/node_modules/$app/tsconfig.json'],
+	test('refuses each npm repo the analysis can not fully read before any network, naming each and its fix', async () => {
+		const { deps, steps } = create_recording_deps({
+			missing: [
+				'/test/repo_a/node_modules',
+				'/test/repo_b/node_modules/$app/tsconfig.json',
+				'/test/repo_e/node_modules'
+			],
 			files: {
 				'/test/repo_a/tsconfig.json': '{"extends": "$app/tsconfig"}',
 				'/test/repo_b/tsconfig.json': '{"extends": "$app/tsconfig"}',
@@ -210,23 +214,53 @@ describe('prepare_gitops_sync', () => {
 				'/test/repo_d/tsconfig.json': '{"compilerOptions": {}}'
 			}
 		});
-		const log = create_stream_log();
-		assert.ok(await prepare_gitops_sync({ config: CONFIG, log }, deps));
-		const gaps = log.stderr
-			.filter((w) => w.includes(': no '))
-			.map((w) => w.replace(/^.*\[test\] /, ''));
-		assert.deepEqual(gaps, [
-			'  repo_a: no `node_modules`',
-			'  repo_b: no `node_modules/$app/tsconfig.json`'
+		const err = await assert_rejects(() =>
+			prepare_gitops_sync({ config: CONFIG, log: create_stream_log() }, deps)
+		);
+		assert.ok(err instanceof TaskError);
+		const lines = err.message.split('\n').filter((l) => l.includes(': no '));
+		assert.deepEqual(lines, [
+			'  repo_a: no `node_modules` — run `npm install` then `gro sync` in /test/repo_a',
+			'  repo_b: no `node_modules/$app/tsconfig.json` — run `gro sync` in /test/repo_b',
+			'  repo_e: no `node_modules` — run `npm install` in /test/repo_e'
 		]);
+		assert.include(err.message, '`.gro/library.json`');
+		assert.notInclude(err.message, '`--allow_dirty`');
+		// no token read, no fetch, no load
+		assert.deepEqual(steps, ['repos status']);
 	});
 
-	test('a repo without a package.json is not warned about', async () => {
-		const { deps } = create_recording_deps({
+	test('refuses an unready repo and a missing dependency in one report', async () => {
+		const { deps, steps } = create_recording_deps({
+			local: { repo_a: DIRTY('repo_a') },
+			missing: ['/test/repo_b/node_modules']
+		});
+		const err = await assert_rejects(() =>
+			prepare_gitops_sync({ config: CONFIG, log: create_stream_log() }, deps)
+		);
+		assert.ok(err instanceof TaskError);
+		assert.include(err.message, 'repo_a: uncommitted changes');
+		assert.include(err.message, 'repo_b: no `node_modules`');
+		assert.deepEqual(steps, ['repos status']);
+	});
+
+	test('--allow_dirty still refuses a missing dependency', async () => {
+		const { deps, steps } = create_recording_deps({ missing: ['/test/repo_a/node_modules'] });
+		await assert_rejects(
+			() =>
+				prepare_gitops_sync({ config: CONFIG, allow_dirty: true, log: create_stream_log() }, deps),
+			/repo_a: no `node_modules`/
+		);
+		assert.deepEqual(steps, ['repos status']);
+	});
+
+	test('a repo without a package.json is not refused', async () => {
+		const { deps, steps } = create_recording_deps({
 			missing: ['/test/repo_a/package.json', '/test/repo_a/node_modules']
 		});
 		const log = create_stream_log();
 		assert.ok(await prepare_gitops_sync({ config: CONFIG, log }, deps));
+		assert.deepEqual(steps, ['repos status', 'token', 'repos status --fetch', 'load']);
 		assert.deepEqual(log.stderr, []);
 	});
 });
@@ -265,6 +299,19 @@ describe('prepare_gitops_sync --check', () => {
 		assert.deepEqual(steps, ['repos status']);
 	});
 
+	test('fails naming a repo missing its dependencies', async () => {
+		const { deps, steps } = create_recording_deps({
+			missing: ['/test/repo_c/node_modules/$app/tsconfig.json'],
+			files: { '/test/repo_c/tsconfig.json': '{"extends": "$app/tsconfig"}' },
+			token: ''
+		});
+		await assert_rejects(
+			() => prepare_gitops_sync({ config: CONFIG, check: true, log: create_stream_log() }, deps),
+			/repo_c: no `node_modules\/\$app\/tsconfig.json` — run `gro sync`/
+		);
+		assert.deepEqual(steps, ['repos status']);
+	});
+
 	test('with --allow_dirty passes what a real run with it would, warning', async () => {
 		const { deps, steps } = create_recording_deps({
 			local: { repo_a: OFF_BRANCH('repo_a') },
@@ -296,6 +343,23 @@ describe('prepare_gitops_sync --check', () => {
 					deps
 				),
 			/`repo_c` is private, and @test\/host is a public package/
+		);
+		assert.deepEqual(steps, ['repos status']);
+	});
+
+	test('with --allow_dirty still fails on a missing dependency', async () => {
+		const { deps, steps } = create_recording_deps({
+			local: { repo_a: OFF_BRANCH('repo_a') },
+			missing: ['/test/repo_b/node_modules'],
+			token: ''
+		});
+		await assert_rejects(
+			() =>
+				prepare_gitops_sync(
+					{ config: CONFIG, check: true, allow_dirty: true, log: create_stream_log() },
+					deps
+				),
+			/repo_b: no `node_modules`/
 		);
 		assert.deepEqual(steps, ['repos status']);
 	});

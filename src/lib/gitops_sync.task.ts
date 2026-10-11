@@ -9,6 +9,7 @@ import { package_json_load } from '@fuzdev/gro/package_json.ts';
 import { existsSync, readFileSync } from 'node:fs';
 import { styleText as st } from 'node:util';
 import type { Logger } from '@fuzdev/fuz_util/log.ts';
+import type { Result } from '@fuzdev/fuz_util/result.ts';
 import { compactReplacer } from 'svelte-docinfo';
 
 import { fetch_repo_data } from './fetch_repo_data.ts';
@@ -53,7 +54,7 @@ export const Args = z.strictObject({
 		.boolean()
 		.meta({
 			description:
-				'report whether the repos are ready to generate from, as of the local refs, and exit non-zero if a real run would refuse; fetches nothing, needs no token, and writes nothing'
+				'report whether the repos are ready to generate from, as of the local refs and installed dependencies, and exit non-zero if a real run would refuse; fetches nothing, needs no token, and writes nothing'
 		})
 		.default(false),
 	allow_dirty: z
@@ -208,9 +209,9 @@ export interface GitopsSyncDeps {
 	}) => Promise<Array<LocalRepo>>;
 	/** Reads `SECRET_GITHUB_API_TOKEN`; `undefined` when it isn't set. */
 	load_token: () => string | undefined;
-	/** Whether a path exists, for the analysis-setup warning. */
+	/** Whether a path exists, for the analysis-setup check. */
 	exists: (path: string) => boolean;
-	/** Reads a file as UTF-8, for the analysis-setup warning. */
+	/** Reads a file as UTF-8, for the analysis-setup check. */
 	read_file: (path: string) => string;
 }
 
@@ -228,23 +229,24 @@ const default_gitops_sync_deps: GitopsSyncDeps = {
  *
  * 1. resolves the config's repos from `repos status <keys…> --json` (local
  *    refs), refusing a private repo when the host package is public
- * 2. checks each repo is ready to generate from (`check_gen_readiness`): on
- *    its registry branch, clean, and idle, unless `allow_dirty` — refusing
- *    before any network. With `check`, that report is the whole run: its
- *    warnings are logged, and it throws when a real run would refuse
+ * 2. checks each repo is ready to generate from, refusing before any network:
+ *    on its registry branch, clean, and idle, unless `allow_dirty`
+ *    (`check_gen_readiness`), and, for an npm repo, with the dependencies the
+ *    library analysis reads its external types from — `node_modules`, and
+ *    `node_modules/$app/tsconfig.json` when its tsconfig extends
+ *    `$app/tsconfig` (`allow_dirty` doesn't reach this: gro can cache the
+ *    analysis at the repo's commit, so a degraded one can outlive the fix).
+ *    With `check`, that report is the whole run: its warnings are logged, and
+ *    it throws when a real run would refuse
  * 3. reads `SECRET_GITHUB_API_TOKEN`
  * 4. fetches the repos from origin (`repos status <keys…> --fetch --json`,
  *    which writes remote-tracking refs and nothing else) and checks them
  *    again, warning on a followed branch not in sync with origin and a
  *    failed fetch
- * 5. warns on each npm repo the library analysis can't fully read: no
- *    `node_modules`, or no `node_modules/$app/tsconfig.json` when its tsconfig
- *    extends `$app/tsconfig` (external types then read as `any`) — it installs
- *    nothing
- * 6. loads each repo's library as it sits
+ * 5. loads each repo's library as it sits
  *
  * @returns the loaded repos and the token, or `null` when `check` passed
- * @throws {TaskError} if resolving fails, a repo isn't ready, or the token is missing
+ * @throws {TaskError} if resolving fails, a repo isn't ready or lacks its dependencies, or the token is missing
  * @nodocs
  */
 export const prepare_gitops_sync = async (
@@ -265,7 +267,7 @@ export const prepare_gitops_sync = async (
 	};
 	const repos_command = to_repos_command(registry);
 
-	const { config_path, gitops_config, report } = await resolve_gitops_repos({
+	const { config_path, gitops_config, report, local_repo_paths } = await resolve_gitops_repos({
 		config,
 		registry,
 		host,
@@ -275,13 +277,17 @@ export const prepare_gitops_sync = async (
 	const keys = gitops_config.repos;
 
 	const local = check_gen_readiness({ report, keys, allow_dirty, repos_command });
+	const setup = check_analysis_setup({ local_repo_paths, exists, read_file });
+	const refusals: Array<string> = [];
+	if (!local.ok) refusals.push(local.message);
+	if (!setup.ok) refusals.push(setup.message);
 	if (check) {
 		log_gen_warnings(local.warnings, log);
-		if (!local.ok) throw new TaskError(local.message);
+		if (refusals.length > 0) throw new TaskError(refusals.join('\n'));
 		log.info(st('green', `all ${keys.length} repos are ready to generate the site data from`));
 		return null;
 	}
-	if (!local.ok) throw new TaskError(local.message);
+	if (refusals.length > 0) throw new TaskError(refusals.join('\n'));
 
 	const token = load_token();
 	if (!token) {
@@ -306,23 +312,7 @@ export const prepare_gitops_sync = async (
 	log_gen_warnings(checked.warnings, log);
 	if (!checked.ok) throw new TaskError(checked.message);
 
-	const local_repo_paths = resolved.value;
-	const gaps = local_repo_paths
-		.map((p) => ({ key: p.repo_name, missing: analysis_setup_gaps(p.repo_dir, exists, read_file) }))
-		.filter((g) => g.missing.length > 0);
-	if (gaps.length > 0) {
-		log.warn(
-			st(
-				'yellow',
-				"the library analysis reads these repos without their dependencies' types, so external types read as `any` — `npm install` and `gro sync` in each fixes it:"
-			)
-		);
-		for (const { key, missing } of gaps) {
-			log.warn(st('yellow', `  ${key}: no ${missing.join(' or ')}`));
-		}
-	}
-
-	const local_repos = await load_repos({ local_repo_paths, log });
+	const local_repos = await load_repos({ local_repo_paths: resolved.value, log });
 	return { local_repos, token };
 };
 
@@ -333,27 +323,60 @@ const log_gen_warnings = (warnings: Array<string>, log: Logger): void => {
 };
 
 /**
- * What an npm repo lacks for the library analysis to resolve its dependencies'
- * types: `node_modules`, or, when its `tsconfig.json` extends `$app/tsconfig`,
- * SvelteKit's generated `node_modules/$app/tsconfig.json` (written by
- * `svelte-kit sync`). The second lives inside the first, so a repo without
- * `node_modules` reports only that. Empty for a repo without a `package.json`.
+ * Refuses each npm repo the library analysis can't fully read — it would
+ * read the repo's external types as `any`, and gro can cache the analysis at
+ * `.gro/library.json` keyed on the repo's commit, so the degraded library
+ * can outlive the fix until the repo's next commit. Each line names the
+ * repo, what it lacks, and the fix; `gitops_sync` installs nothing.
+ *
+ * @returns the refusal message and its lines, or ok when every repo can be read
  */
-const analysis_setup_gaps = (
+const check_analysis_setup = (options: {
+	local_repo_paths: ReadonlyArray<LocalRepoPath>;
+	exists: (path: string) => boolean;
+	read_file: (path: string) => string;
+}): Result<object, { message: string; lines: Array<string> }> => {
+	const { local_repo_paths, exists, read_file } = options;
+	const lines: Array<string> = [];
+	for (const { repo_name, repo_dir } of local_repo_paths) {
+		const gap = analysis_setup_gap(repo_dir, exists, read_file);
+		if (gap) lines.push(`${repo_name}: no ${gap.missing} — run ${gap.fix} in ${repo_dir}`);
+	}
+	if (lines.length === 0) return { ok: true };
+	const message =
+		"not generating the site data: the library analysis would read these repos' external types as `any`, " +
+		"and gro can cache it at `.gro/library.json` until the repo's next commit, so each must have its " +
+		`dependencies installed:\n  ${lines.join('\n  ')}\n` +
+		'A `.gro/library.json` already cached at the current commit by an analysis without them ' +
+		'stays after the fix — delete it to re-analyze.';
+	return { ok: false, message, lines };
+};
+
+/**
+ * What an npm repo lacks for the library analysis to resolve its dependencies'
+ * types, and the fix: `node_modules`, or, when its `tsconfig.json` extends
+ * `$app/tsconfig`, SvelteKit's generated `node_modules/$app/tsconfig.json`
+ * (written by `svelte-kit sync`, which `gro sync` runs). The second lives
+ * inside the first, so a repo without `node_modules` reports only that, with
+ * both fixes when it needs both. `null` for a repo without a `package.json`.
+ */
+const analysis_setup_gap = (
 	repo_dir: string,
 	exists: (path: string) => boolean,
 	read_file: (path: string) => string
-): Array<string> => {
-	if (!exists(join(repo_dir, 'package.json'))) return [];
-	if (!exists(join(repo_dir, 'node_modules'))) return ['`node_modules`'];
+): { missing: string; fix: string } | null => {
+	if (!exists(join(repo_dir, 'package.json'))) return null;
 	const tsconfig_path = join(repo_dir, 'tsconfig.json');
-	const kit_tsconfig = 'node_modules/$app/tsconfig.json';
-	if (
-		exists(tsconfig_path) &&
-		read_file(tsconfig_path).includes('$app/tsconfig') &&
-		!exists(join(repo_dir, kit_tsconfig))
-	) {
-		return [`\`${kit_tsconfig}\``];
+	const extends_kit = exists(tsconfig_path) && read_file(tsconfig_path).includes('$app/tsconfig');
+	if (!exists(join(repo_dir, 'node_modules'))) {
+		return {
+			missing: '`node_modules`',
+			fix: extends_kit ? '`npm install` then `gro sync`' : '`npm install`'
+		};
 	}
-	return [];
+	const kit_tsconfig = 'node_modules/$app/tsconfig.json';
+	if (extends_kit && !exists(join(repo_dir, kit_tsconfig))) {
+		return { missing: `\`${kit_tsconfig}\``, fix: '`gro sync`' };
+	}
+	return null;
 };

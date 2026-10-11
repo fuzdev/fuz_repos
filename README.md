@@ -128,10 +128,11 @@ gro gitops_sync --check       # the readiness report alone: no fetch, no token, 
 gro gitops_sync --allow_dirty # read repos off their branch, dirty, or mid-operation as they sit, warning instead
 ```
 
-It reads each repo as it sits and never moves one (`repos sync` does), so it
-refuses a repo off its registry branch, dirty, or mid-operation — the site
-would show that tree's modules beside origin's CI — and warns on one behind
-origin or missing its `node_modules`.
+It reads each repo as it sits and never moves or installs one (`repos sync`
+moves them), so it refuses a repo off its registry branch, dirty, or
+mid-operation — the site would show that tree's modules beside origin's CI —
+or missing the installed dependencies its library analysis reads, and warns on
+one behind origin.
 
 ### Diagnostic commands (read-only)
 

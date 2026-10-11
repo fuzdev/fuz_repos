@@ -21,6 +21,7 @@ import {
 	local_repos_load,
 	local_repos_resolve,
 	type LocalRepo,
+	type LocalRepoLoadOptions,
 	type LocalRepoPath
 } from './local_repo.ts';
 import { load_repos_status, to_repos_command } from './repos_status_load.ts';
@@ -203,10 +204,9 @@ export interface GitopsSyncDeps {
 	/** Runs `repos status`. */
 	repos_ops: ReposOperations;
 	/** Loads each resolved repo's library as it sits (`local_repos_load`). */
-	load_repos: (options: {
-		local_repo_paths: Array<LocalRepoPath>;
-		log?: Logger;
-	}) => Promise<Array<LocalRepo>>;
+	load_repos: (
+		options: LocalRepoLoadOptions & { local_repo_paths: Array<LocalRepoPath> }
+	) => Promise<Array<LocalRepo>>;
 	/** Reads `SECRET_GITHUB_API_TOKEN`; `undefined` when it isn't set. */
 	load_token: () => string | undefined;
 	/** Whether a path exists, for the analysis-setup check. */
@@ -243,7 +243,9 @@ const default_gitops_sync_deps: GitopsSyncDeps = {
  *    which writes remote-tracking refs and nothing else) and checks them
  *    again, warning on a followed branch not in sync with origin and a
  *    failed fetch
- * 5. loads each repo's library as it sits
+ * 5. loads each repo's library as it sits, with its modules — the dashboard
+ *    renders them — which gro analyzes or reads from the repo's
+ *    `.gro/library.json` at a clean commit
  *
  * @returns the loaded repos and the token, or `null` when `check` passed
  * @throws {TaskError} if resolving fails, a repo isn't ready or lacks its dependencies, or the token is missing
@@ -312,7 +314,7 @@ export const prepare_gitops_sync = async (
 	log_gen_warnings(checked.warnings, log);
 	if (!checked.ok) throw new TaskError(checked.message);
 
-	const local_repos = await load_repos({ local_repo_paths: resolved.value, log });
+	const local_repos = await load_repos({ local_repo_paths: resolved.value, modules: true, log });
 	return { local_repos, token };
 };
 

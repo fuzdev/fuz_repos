@@ -3,9 +3,9 @@
  *
  * `resolve_gitops_repos()` loads the config's registry keys, runs
  * `repos status <keys…> --json`, and resolves each key to its checkout.
- * `get_gitops_ready()` then loads each repo's library as its working tree
- * sits. `gate_publish_readiness()` is the read-only gate a real publish runs
- * before its prompt, and `log_readiness_block()` the diagnostics' report of
+ * `get_gitops_ready()` then loads each repo's `package.json` as its working
+ * tree sits, without the module analysis. `gate_publish_readiness()` is the
+ * read-only gate a real publish runs before its prompt, and `log_readiness_block()` the diagnostics' report of
  * repos not at rest (both over `repo_readiness.ts`).
  *
  * Used by: `gitops_sync.task.ts`, `gitops_analyze.task.ts`, `gitops_plan.task.ts`,
@@ -100,11 +100,12 @@ export const resolve_gitops_repos = async (
 };
 
 /**
- * Central initialization function for the gitops tasks that load libraries:
+ * Central initialization function for the publishing and dependency tasks
+ * (`gitops_analyze`, `gitops_plan`, `gitops_publish`, `gitops_validate`):
  * resolves the config's repos through `repos status` (`resolve_gitops_repos`),
- * then loads each repo's library as its working tree sits (`local_repos_load`).
- * Moves no ref; gro caches each library at `.gro/library.json` in its repo, at
- * a clean commit.
+ * then loads each repo as its working tree sits (`local_repos_load`) with no
+ * module analysis — those tasks read each package's name, version, and
+ * dependencies, never its modules — so it moves no ref and writes nothing.
  *
  * @returns the loaded repos, in config order
  * @throws {TaskError} if resolving the repos or loading them fails
@@ -113,7 +114,11 @@ export const get_gitops_ready = async (
 	options: ResolveGitopsReposOptions
 ): Promise<{ local_repos: Array<LocalRepo> }> => {
 	const { local_repo_paths } = await resolve_gitops_repos(options);
-	const local_repos = await local_repos_load({ local_repo_paths, log: options.log });
+	const local_repos = await local_repos_load({
+		local_repo_paths,
+		modules: false,
+		log: options.log
+	});
 	return { local_repos };
 };
 

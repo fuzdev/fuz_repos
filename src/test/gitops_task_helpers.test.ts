@@ -1,12 +1,12 @@
 import { assert, describe, test } from 'vitest';
 import { assert_rejects } from '@fuzdev/fuz_util/testing.ts';
 import { TaskError } from '@fuzdev/gro';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { resolve_gitops_repos } from '#lib/gitops_task_helpers.ts';
+import { get_gitops_ready, resolve_gitops_repos } from '#lib/gitops_task_helpers.ts';
 import { basic_publishing } from './fixtures/repo_fixtures/basic_publishing.ts';
 import {
 	create_mock_repos_entry,
@@ -173,5 +173,46 @@ describe('resolve_gitops_repos', () => {
 				}),
 			/No gitops config found/
 		);
+	});
+});
+
+describe('get_gitops_ready', () => {
+	test('loads each npm repo without the module analysis', async () => {
+		const workspace = mkdtempSync(join(tmpdir(), 'gitops-ready-'));
+		try {
+			// each repo has a module, a tsconfig extending `$app/tsconfig`, and no `node_modules`
+			for (const key of KEYS) {
+				const dir = join(workspace, key);
+				mkdirSync(join(dir, 'src/lib'), { recursive: true });
+				writeFileSync(
+					join(dir, 'package.json'),
+					JSON.stringify({
+						name: `@test/${key}`,
+						version: '1.0.0',
+						repository: `https://github.com/test/${key}`
+					})
+				);
+				writeFileSync(join(dir, 'tsconfig.json'), '{"extends": "$app/tsconfig"}');
+				writeFileSync(join(dir, 'src/lib/a.ts'), 'export const a = 1;\n');
+			}
+			const { local_repos } = await get_gitops_ready({
+				config: CONFIG,
+				repos_ops: create_mock_repos_ops(
+					create_mock_repos_report(
+						KEYS.map((key) => create_mock_repos_entry({ key })),
+						{ workspace }
+					)
+				)
+			});
+			assert.deepEqual(
+				local_repos.map((r) => r.library.name),
+				KEYS.map((key) => `@test/${key}`)
+			);
+			for (const repo of local_repos) {
+				assert.deepEqual(repo.library.source_json.modules, []);
+			}
+		} finally {
+			rmSync(workspace, { recursive: true, force: true });
+		}
 	});
 });

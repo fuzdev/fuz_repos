@@ -1,9 +1,10 @@
 import { to_error_message } from '@fuzdev/fuz_util/error.ts';
 import { library_json_from_modules, type LibraryJson } from '@fuzdev/fuz_util/library_json.ts';
-import type { PackageJson } from '@fuzdev/fuz_util/package_json.ts';
+import { PackageJson } from '@fuzdev/fuz_util/package_json.ts';
 import type { Result } from '@fuzdev/fuz_util/result.ts';
 import { Library } from '@fuzdev/fuz_ui/library.svelte.ts';
 import { existsSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { TaskError } from '@fuzdev/gro';
 import { library_load_from_repo } from '@fuzdev/gro/library_load.ts';
@@ -130,25 +131,39 @@ export const local_repos_resolve = (options: {
 };
 
 /**
+ * Options for loading resolved repos (`local_repo_load`, `local_repos_load`).
+ */
+export interface LocalRepoLoadOptions {
+	/**
+	 * Whether an npm repo's library carries its modules. `true` runs gro's
+	 * `library_load_from_repo` — the svelte-docinfo analysis, cached at
+	 * `.gro/library.json` in the repo at a clean commit — for the dashboard,
+	 * which renders each repo's `source_json`. `false` reads the `package.json`
+	 * alone into a `Library` with no modules, analyzing and writing nothing:
+	 * the publishing and dependency tasks read only the package's name,
+	 * version, and dependencies. A `cargo` repo never has modules.
+	 */
+	modules: boolean;
+	log?: Logger;
+}
+
+/**
  * Loads a resolved repo as its working tree sits (the tasks read where each
- * repo sits from `repos status`, and `repos sync` moves them). Moves no ref;
- * gro caches the library at `.gro/library.json` in the repo, at a clean commit.
+ * repo sits from `repos status`, and `repos sync` moves them). Moves no ref.
  *
- * 1. Loads `library_json` via `library_load_from_repo` (svelte-docinfo analysis)
+ * 1. Loads `library_json`, with the module analysis or without it (`modules`)
  * 2. Creates `Library` and extracts dependency maps
  *
  * A repo with no `package.json` but a Rust `Cargo.toml` loads as a
  * dashboard-only `cargo` repo instead.
  *
- * @throws {TaskError} if the analysis fails
+ * @throws {TaskError} if the `package.json` or the analysis fails
  */
 export const local_repo_load = async ({
 	local_repo_path,
+	modules,
 	log
-}: {
-	local_repo_path: LocalRepoPath;
-	log?: Logger;
-}): Promise<LocalRepo> => {
+}: LocalRepoLoadOptions & { local_repo_path: LocalRepoPath }): Promise<LocalRepo> => {
 	const { entry, repo_dir, repo_name } = local_repo_path;
 
 	// A repo with no `package.json` but a Rust `Cargo.toml` isn't an npm package and can't be
@@ -159,11 +174,12 @@ export const local_repo_load = async ({
 		return local_repo_load_cargo({ local_repo_path });
 	}
 
-	// Load library metadata via svelte-docinfo analysis (cached under `.gro/library.json`).
 	let library_json: LibraryJson;
 	let package_json: PackageJson;
 	try {
-		({ library_json, package_json } = await library_load_from_repo(repo_dir, { log }));
+		({ library_json, package_json } = modules
+			? await library_load_from_repo(repo_dir, { log })
+			: await library_load_manifest(repo_dir));
 	} catch (err) {
 		throw new TaskError(
 			`Failed to load library metadata for repo "${repo_name}" in ${repo_dir}: ${to_error_message(err)}`
@@ -191,6 +207,21 @@ export const local_repo_load = async ({
 	}
 
 	return local_repo;
+};
+
+/**
+ * Reads an npm repo's `package.json` into a `LibraryJson` with no modules,
+ * validated as gro's `library_load_from_repo` validates it, without the
+ * analysis or its cache.
+ */
+const library_load_manifest = async (
+	repo_dir: string
+): Promise<{ library_json: LibraryJson; package_json: PackageJson }> => {
+	const package_json_path = join(repo_dir, 'package.json');
+	const package_json = PackageJson.parse(JSON.parse(await readFile(package_json_path, 'utf8')));
+	if (!package_json.name) throw Error(`missing \`name\` in ${package_json_path}`);
+	if (!package_json.version) throw Error(`missing \`version\` in ${package_json_path}`);
+	return { library_json: library_json_from_modules(package_json, []), package_json };
 };
 
 /**
@@ -239,14 +270,19 @@ const local_repo_load_cargo = async ({
 	};
 };
 
+/**
+ * Loads each resolved repo (`local_repo_load`), in order.
+ *
+ * @throws {TaskError} naming every repo that failed to load
+ */
 export const local_repos_load = async ({
 	local_repo_paths,
+	modules,
 	log,
 	parallel = true,
 	concurrency = GITOPS_CONCURRENCY_DEFAULT
-}: {
+}: LocalRepoLoadOptions & {
 	local_repo_paths: Array<LocalRepoPath>;
-	log?: Logger;
 	parallel?: boolean;
 	concurrency?: number;
 }): Promise<Array<LocalRepo>> => {
@@ -254,7 +290,7 @@ export const local_repos_load = async ({
 		// sequential loading
 		const loaded: Array<LocalRepo> = [];
 		for (const local_repo_path of local_repo_paths) {
-			loaded.push(await local_repo_load({ local_repo_path, log }));
+			loaded.push(await local_repo_load({ local_repo_path, modules, log }));
 		}
 		return loaded;
 	}
@@ -264,7 +300,7 @@ export const local_repos_load = async ({
 		local_repo_paths,
 		concurrency,
 		async (local_repo_path) => {
-			return local_repo_load({ local_repo_path, log });
+			return local_repo_load({ local_repo_path, modules, log });
 		}
 	);
 

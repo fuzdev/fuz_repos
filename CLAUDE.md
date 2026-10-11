@@ -68,15 +68,17 @@ diverged.
 | remote branches, under policy | **gateway** | `repos push`, and the push step of `repos sync` (a rebased branch's included, under either): fast-forwards only, under a lease, to the registry's SSH URL, owned entries only, no tags or force; a new remote branch is `repos push --new-branch`, the user's |
 | releases: npm, git commits and tags, deploys | **publish** | `gitops_publish --wetrun`, and gro's own `publish` and `deploy` it runs — the user's |
 
-"Nothing in git" is exact for `repos status`; the TS observe tasks move no
-ref, though gro's `git status` may refresh a repo's index, and they cache
-each repo's library metadata (gro's `library_load_from_repo`) at
-`.gro/library.json` inside that repo, only at a clean commit; `--outfile`
+"Nothing in git" is exact for `repos status` and for the TS observe tasks:
+they read each repo's files as they sit (`package.json`, changesets, workflow
+files), without gro's module analysis, and write nothing in it; `--outfile`
 writes where it's told. `gitops_sync` writes its own host's site data
 (`repos.json`, `repos.ts`, in the routes dir or `--outdir`) and its GitHub
 fetch cache under the host's `.gro/`; in the other repos it writes only the
-library cache the observe tasks keep too. A fetch stays in **observe**: it
-refreshes the view of origin and moves no branch anyone works on.
+library metadata cache of its module analysis (gro's
+`library_load_from_repo`), at `.gro/library.json` inside each repo, only at a
+clean commit, and gro's `git status` there may refresh a repo's index. A fetch
+stays in **observe**: it refreshes the view of origin and moves no branch
+anyone works on.
 `gitops_plan` and the publish dry run belong to the publishing vertical but
 sit in **observe**: they write nothing in git. `gitops_validate` composes
 analyze, plan, the publish dry run, and `ci_reconcile`, each in its observe
@@ -201,8 +203,8 @@ of its own: it consumes `repos status --json` rather than growing
 `GitOperations` or parsing `git status` porcelain.
 
 TS keeps everything else: the dashboard, its data step (GitHub metadata and
-svelte-docinfo library analysis), and the publish cascade. A project's
-`gitops.config.ts` is a list of registry keys, and every TS task resolves
+svelte-docinfo library analysis, which only `gitops_sync` runs), and the
+publish cascade. A project's `gitops.config.ts` is a list of registry keys, and every TS task resolves
 them through `repos status <keys…> --json` — each repo's dir, URL, branch,
 visibility, `ci`, and `archived` come from the registry, and the TS side
 clones nothing. Readiness is read from the report too: a real publish
@@ -236,8 +238,10 @@ Every `src/lib` module is listed here or under
 - `src/lib/gitops_config.ts` - config schema, loading, and the public-host
   leak guard
 - `src/lib/gitops_task_helpers.ts` - `resolve_gitops_repos` (config keys →
-  `repos status` → checkouts) and `get_gitops_ready` (plus library loading),
-  shared by every task; `gate_publish_readiness` and `log_readiness_block`
+  `repos status` → checkouts), shared by every task, and `get_gitops_ready`
+  (plus loading each repo's `package.json`, no module analysis) for the
+  publishing and dependency tasks; `gate_publish_readiness` and
+  `log_readiness_block`
 - `src/lib/repos_status_load.ts` - runs `repos status --json` through the
   injected `ReposOperations` and parses its report or error document
 - `src/lib/repo_readiness.ts` - pure readiness predicates over the report's
@@ -254,7 +258,9 @@ Every `src/lib` module is listed here or under
   workflow files in its checkout (`missing_ci`, `stray_ci`), skipping archived
   repos; `gitops_validate`'s last step
 - `src/lib/local_repo.ts` - resolves config keys against the report
-  (`local_repos_resolve`) and loads each repo's library as it sits
+  (`local_repos_resolve`) and loads each repo's library as it sits — with
+  its modules (svelte-docinfo analysis, for the dashboard) or from its
+  `package.json` alone (`modules`, chosen at each load site)
 - `src/lib/github.ts` - GitHub API client for PRs, CI status
 - `src/lib/github_helpers.ts` - flattens repos' pull requests for the
   dashboard, with an optional filter, and builds PR URLs
@@ -922,9 +928,10 @@ the key resolution (`local_repo.resolve.test.ts`).
   SvelteKit routes dir (`src/routes/` by default, overridable with `--outdir`).
   These are committed (the site renders from them).
 - **Caches** (gitignored, under `.gro/`) — the fetch-value cache at
-  `.gro/build/fetch/`, and, in each repo analyzed, the `svelte-docinfo`
-  library metadata at `.gro/library.json` (written by gro's
-  `library_load_from_repo`, keyed by a clean `HEAD`).
+  `.gro/build/fetch/`, and, in each repo `gitops_sync` analyzes, the
+  `svelte-docinfo` library metadata at `.gro/library.json` (written by gro's
+  `library_load_from_repo`, keyed by a clean `HEAD`). The other tasks read
+  `package.json` alone and write no cache.
 
 ## Additional Documentation
 

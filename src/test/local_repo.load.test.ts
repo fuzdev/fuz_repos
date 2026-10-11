@@ -12,8 +12,8 @@ import {
 } from '#lib/local_repo.ts';
 import { create_mock_repos_entry } from './test_helpers.ts';
 
-/** Builds a `LocalRepoPath` pointing at a real temp dir for the cargo divert tests. */
-const cargo_local_repo_path = (repo_dir: string, name = 'rust-repo'): LocalRepoPath => ({
+/** Builds a `LocalRepoPath` pointing at a real temp dir. */
+const temp_local_repo_path = (repo_dir: string, name = 'rust-repo'): LocalRepoPath => ({
 	repo_name: name,
 	repo_dir,
 	repo_url: `https://github.com/test/${name}`,
@@ -29,7 +29,8 @@ describe('local_repo_load', () => {
 			writeFileSync(join(dir, 'Cargo.toml'), '[workspace.package]\nversion = "0.4.2"\n');
 
 			const repo = await local_repo_load({
-				local_repo_path: cargo_local_repo_path(dir)
+				local_repo_path: temp_local_repo_path(dir),
+				modules: false
 			});
 
 			assert.strictEqual(repo.kind, 'cargo');
@@ -56,7 +57,8 @@ describe('local_repo_load', () => {
 			);
 
 			const repo = await local_repo_load({
-				local_repo_path: cargo_local_repo_path(dir)
+				local_repo_path: temp_local_repo_path(dir),
+				modules: false
 			});
 
 			assert.strictEqual(repo.kind, 'cargo');
@@ -72,9 +74,69 @@ describe('local_repo_load', () => {
 	test('a repo with neither package.json nor Cargo.toml still fails as a metadata-load error', async () => {
 		const dir = mkdtempSync(join(tmpdir(), 'gitops-empty-'));
 		try {
+			for (const modules of [true, false]) {
+				await assert_rejects(
+					() => local_repo_load({ local_repo_path: temp_local_repo_path(dir), modules }),
+					/Failed to load library metadata/
+				);
+			}
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+});
+
+// -- npm repos without the module analysis --
+describe('local_repo_load without modules', () => {
+	/**
+	 * Writes an npm repo the analysis couldn't fully read: a module, a tsconfig
+	 * extending `$app/tsconfig`, and no `node_modules`.
+	 */
+	const write_npm_repo = (dir: string, package_json: Record<string, unknown>): void => {
+		writeFileSync(join(dir, 'package.json'), JSON.stringify(package_json));
+		writeFileSync(join(dir, 'tsconfig.json'), '{"extends": "$app/tsconfig"}');
+		mkdirSync(join(dir, 'src/lib'), { recursive: true });
+		writeFileSync(join(dir, 'src/lib/a.ts'), 'export const a = 1;\n');
+	};
+
+	test('reads the package.json alone, with no modules', async () => {
+		const dir = mkdtempSync(join(tmpdir(), 'gitops-npm-'));
+		try {
+			write_npm_repo(dir, {
+				name: '@test/npm_repo',
+				version: '0.3.1',
+				repository: 'https://github.com/test/npm_repo',
+				dependencies: { '@test/dep': '^1.0.0' },
+				devDependencies: { '@test/dev': '>=0.2.0' },
+				peerDependencies: { '@test/peer': '>=0.1.0' }
+			});
+			const repo = await local_repo_load({
+				local_repo_path: temp_local_repo_path(dir, 'npm_repo'),
+				modules: false
+			});
+			assert.strictEqual(repo.kind, 'npm');
+			assert.strictEqual(repo.library.name, '@test/npm_repo');
+			assert.strictEqual(repo.package_json.version, '0.3.1');
+			assert.deepEqual(repo.library.source_json.modules, []);
+			assert.deepEqual([...repo.dependencies!], [['@test/dep', '^1.0.0']]);
+			assert.deepEqual([...repo.dev_dependencies!], [['@test/dev', '>=0.2.0']]);
+			assert.deepEqual([...repo.peer_dependencies!], [['@test/peer', '>=0.1.0']]);
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	test('fails a package.json without a version as a metadata-load error', async () => {
+		const dir = mkdtempSync(join(tmpdir(), 'gitops-npm-'));
+		try {
+			write_npm_repo(dir, { name: '@test/npm_repo', repository: 'https://github.com/test/x' });
 			await assert_rejects(
-				() => local_repo_load({ local_repo_path: cargo_local_repo_path(dir) }),
-				/Failed to load library metadata/
+				() =>
+					local_repo_load({
+						local_repo_path: temp_local_repo_path(dir, 'npm_repo'),
+						modules: false
+					}),
+				/Failed to load library metadata for repo "npm_repo".*missing `version`/
 			);
 		} finally {
 			rmSync(dir, { recursive: true, force: true });
@@ -93,8 +155,9 @@ describe('local_repos_load', () => {
 				() =>
 					local_repos_load({
 						local_repo_paths: ['ok', 'bad-a', 'bad-b'].map((name) =>
-							cargo_local_repo_path(join(root, name), name)
-						)
+							temp_local_repo_path(join(root, name), name)
+						),
+						modules: false
 					}),
 				/Failed to load 2 repos/
 			);
@@ -115,8 +178,9 @@ describe('local_repos_load', () => {
 				() =>
 					local_repos_load({
 						local_repo_paths: ['bad-a', 'bad-b'].map((name) =>
-							cargo_local_repo_path(join(root, name), name)
+							temp_local_repo_path(join(root, name), name)
 						),
+						modules: false,
 						parallel: false
 					}),
 				/Failed to load library metadata for repo "bad-a"/

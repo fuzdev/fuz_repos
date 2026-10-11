@@ -99,6 +99,9 @@ production/peer takes priority for dependency graph calculations.
 - `--format json` carries `no_changes` (package names) apart from `info`
   (informational sentences: excluded non-npm repos, dev dependency cycles)
 - Read-only - moves no ref and writes nothing in git
+- Reads each repo's `package.json` (name, version, dependencies) and its
+  changesets, with no module analysis, so it needs no `node_modules` and
+  writes no library cache
 - Reads each repo's working tree **as-is** (whatever branch is checked out, even
   with uncommitted changes), and prints a readiness block naming each repo not
   at rest (see [Readiness](#readiness)), so a plan over a feature branch says

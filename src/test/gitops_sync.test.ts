@@ -76,8 +76,9 @@ const create_recording_deps = (
 					return inner.status(status_options);
 				}
 			},
-			load_repos: async ({ local_repo_paths }) => {
-				steps.push('load');
+			load_repos: async ({ local_repo_paths, modules }) => {
+				// the dashboard renders modules, so sync loads with the analysis
+				steps.push(modules ? 'load' : 'load without modules');
 				return local_repo_paths.map((p) => {
 					const repo = create_mock_repo({ name: p.repo_name });
 					repo.entry = p.entry;

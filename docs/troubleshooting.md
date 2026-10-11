@@ -112,11 +112,13 @@ installs nothing, and `--allow_dirty` doesn't reach this refusal.
 `gro gitops_sync --check` reports it too.
 
 The other tasks (`gitops_analyze`, `gitops_plan`, `gitops_publish`,
-`gitops_validate`) load libraries through the same cache without this check,
-so one run in a repo missing its dependencies can cache a degraded library
-that a later `gitops_sync` reads at that commit. If the dashboard shows `any`
-for a repo whose dependencies are installed, delete its `.gro/library.json`
-and run `gro gitops_sync` again.
+`gitops_validate`) load each repo from its `package.json` alone — no module
+analysis and no `.gro/library.json` — so loading needs no installed
+dependencies (a `gitops_publish --wetrun` still builds and publishes each
+repo, which does). A `.gro/library.json` cached by an analysis without the
+dependencies (another `library_load_from_repo` caller, or an older
+fuz_repos) stays at its commit: if the dashboard shows `any` for a repo whose
+dependencies are installed, delete it and run `gro gitops_sync` again.
 
 ### "npm authentication failed"
 

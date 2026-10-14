@@ -1,6 +1,7 @@
 import type { Task } from '@fuzdev/gro';
 import type { Logger } from '@fuzdev/fuz_util/log.ts';
-import { z } from 'zod';
+import * as s from '@fuzdev/fuz_schema/schema.ts';
+import { meta } from '@fuzdev/fuz_schema/meta.ts';
 import { createInterface } from 'node:readline/promises';
 import { styleText as st } from 'node:util';
 
@@ -37,60 +38,66 @@ import {
 import { GITOPS_CONFIG_PATH_DEFAULT, GITOPS_NPM_WAIT_TIMEOUT_DEFAULT } from './gitops_constants.ts';
 
 /** @nodocs */
-export const Args = z.strictObject({
-	config: z
-		.string()
-		.meta({ description: 'path to the gitops config file, absolute or relative to the cwd' })
-		.default(GITOPS_CONFIG_PATH_DEFAULT),
-	registry: z
-		.string()
-		.meta({
+export const Args = s.object({
+	config: s.with_default(
+		meta(s.string, {
+			description: 'path to the gitops config file, absolute or relative to the cwd'
+		}),
+		GITOPS_CONFIG_PATH_DEFAULT
+	),
+	registry: s.optional(
+		meta(s.string, {
 			description:
 				'path to the repos.toml registry, when `repos` would not find it walking up from the cwd'
 		})
-		.optional(),
-	peer_strategy: z
-		.enum(['exact', 'caret', 'tilde', 'gte'])
-		.meta({
+	),
+	peer_strategy: s.with_default(
+		meta(s.one_of(['exact', 'caret', 'tilde', 'gte']), {
 			description:
 				'range prefix for a rewritten dependency of any type whose range has none (an existing prefix is kept; a wildcard becomes ^)'
-		})
-		.default('caret' as const),
-	wetrun: z.boolean().meta({ description: 'actually publish (default is dry run)' }).default(false),
-	format: z
-		.enum(['stdout', 'json', 'markdown'])
-		.meta({ description: 'output format' })
-		.default('stdout'),
-	deploy: z
-		.boolean()
-		.meta({
+		}),
+		'caret'
+	),
+	wetrun: s.with_default(
+		meta(s.boolean, { description: 'actually publish (default is dry run)' }),
+		false
+	),
+	format: s.with_default(
+		meta(s.one_of(['stdout', 'json', 'markdown']), { description: 'output format' }),
+		'stdout'
+	),
+	deploy: s.with_default(
+		meta(s.boolean, {
 			description:
 				'deploy each repo the run changed (published, or any dependency updated) after publishing'
-		})
-		.default(false),
-	plan: z
-		.boolean()
-		.meta({ description: 'show the plan and confirm before publishing; --no-plan to skip' })
-		.default(true),
-	max_wait: z
-		.number()
-		.meta({ description: 'max time to wait for npm propagation in ms' })
-		.default(GITOPS_NPM_WAIT_TIMEOUT_DEFAULT),
-	emit_json: z
-		.boolean()
-		.meta({ description: 'stream structured publishing events as JSON-lines to stdout' })
-		.default(false),
-	outfile: z.string().meta({ description: 'write output to file instead of logging' }).optional(),
-	verbose: z
-		.boolean()
-		.meta({ description: 'show additional details in plan output' })
-		.default(false),
-	preview: z
-		.boolean()
-		.meta({ description: 'show the ordered side-effects a --wetrun would perform' })
-		.default(false)
+		}),
+		false
+	),
+	plan: s.with_default(
+		meta(s.boolean, {
+			description: 'show the plan and confirm before publishing; --no-plan to skip'
+		}),
+		true
+	),
+	max_wait: s.with_default(
+		meta(s.number, { description: 'max time to wait for npm propagation in ms' }),
+		GITOPS_NPM_WAIT_TIMEOUT_DEFAULT
+	),
+	emit_json: s.with_default(
+		meta(s.boolean, { description: 'stream structured publishing events as JSON-lines to stdout' }),
+		false
+	),
+	outfile: s.optional(meta(s.string, { description: 'write output to file instead of logging' })),
+	verbose: s.with_default(
+		meta(s.boolean, { description: 'show additional details in plan output' }),
+		false
+	),
+	preview: s.with_default(
+		meta(s.boolean, { description: 'show the ordered side-effects a --wetrun would perform' }),
+		false
+	)
 });
-export type Args = z.infer<typeof Args>;
+export type Args = s.Infer<typeof Args>;
 
 /** @nodocs */
 export const task: Task<Args> = {

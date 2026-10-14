@@ -1,5 +1,6 @@
 import { TaskError, type Task } from '@fuzdev/gro';
-import { z } from 'zod';
+import * as s from '@fuzdev/fuz_schema/schema.ts';
+import { meta } from '@fuzdev/fuz_schema/meta.ts';
 import { readFile, writeFile } from 'node:fs/promises';
 import { format_file } from '@fuzdev/gro/format_file.ts';
 import { basename, join, resolve } from 'node:path';
@@ -32,41 +33,41 @@ import { default_repos_operations } from './operations_defaults.ts';
 // TODO add flag to ignore or invalidate cache -- no-cache? clean?
 
 /** @nodocs */
-export const Args = z.strictObject({
-	config: z
-		.string()
-		.meta({ description: 'path to the gitops config file, absolute or relative to the cwd' })
-		.default(GITOPS_CONFIG_PATH_DEFAULT),
-	registry: z
-		.string()
-		.meta({
+export const Args = s.object({
+	config: s.with_default(
+		meta(s.string, {
+			description: 'path to the gitops config file, absolute or relative to the cwd'
+		}),
+		GITOPS_CONFIG_PATH_DEFAULT
+	),
+	registry: s.optional(
+		meta(s.string, {
 			description:
 				'path to the repos.toml registry, when `repos` would not find it walking up from the cwd'
 		})
-		.optional(),
-	outdir: z
-		.string()
-		.meta({
+	),
+	outdir: s.optional(
+		meta(s.string, {
 			description:
 				'path to the directory for the generated files, defaults to the SvelteKit routes directory'
 		})
-		.optional(),
-	check: z
-		.boolean()
-		.meta({
+	),
+	check: s.with_default(
+		meta(s.boolean, {
 			description:
 				'report whether the repos are ready to generate from, as of the local refs and installed dependencies, and exit non-zero if a real run would refuse; fetches nothing, needs no token, and writes nothing'
-		})
-		.default(false),
-	allow_dirty: z
-		.boolean()
-		.meta({
+		}),
+		false
+	),
+	allow_dirty: s.with_default(
+		meta(s.boolean, {
 			description:
 				'read repos off their registry branch, dirty, or mid-operation as they sit, warning instead of refusing'
-		})
-		.default(false)
+		}),
+		false
+	)
 });
-export type Args = z.infer<typeof Args>;
+export type Args = s.Infer<typeof Args>;
 
 /**
  * Generates the dashboard's site data (`repos.json` and `repos.ts`) from each

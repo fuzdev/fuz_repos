@@ -1,6 +1,7 @@
 import { assert, describe, test } from 'vitest';
 import { assert_rejects } from '@fuzdev/fuz_util/testing.ts';
 import { TaskError } from '@fuzdev/gro';
+import * as s from '@fuzdev/fuz_schema/schema.ts';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -67,7 +68,11 @@ describe('run_gitops_run', () => {
 	test('runs the command in every repo, in its dir', async () => {
 		const deps = create_deps();
 		const log = create_stream_log();
-		await run_gitops_run(Args.parse({ _: ['git', 'status'], config: CONFIG }), log, deps);
+		await run_gitops_run(
+			s.parse_or_throw(Args, { _: ['git', 'status'], config: CONFIG }),
+			log,
+			deps
+		);
 		assert.sameMembers(
 			deps.calls.map((c) => c.cwd),
 			KEYS.map((k) => `/test/${k}`)
@@ -79,7 +84,7 @@ describe('run_gitops_run', () => {
 	test('refuses an empty command before resolving the repos', async () => {
 		const deps = create_deps();
 		await assert_rejects(
-			() => run_gitops_run(Args.parse({ config: CONFIG }), create_stream_log(), deps),
+			() => run_gitops_run(s.parse_or_throw(Args, { config: CONFIG }), create_stream_log(), deps),
 			/No command provided/
 		);
 		assert.deepEqual(deps.calls, []);
@@ -91,7 +96,11 @@ describe('run_gitops_run', () => {
 			{ repo_c: create_mock_repos_entry({ key: 'repo_c', presence: { kind: 'missing' } }) }
 		);
 		const err = await assert_rejects(() =>
-			run_gitops_run(Args.parse({ _: ['true'], config: CONFIG }), create_stream_log(), deps)
+			run_gitops_run(
+				s.parse_or_throw(Args, { _: ['true'], config: CONFIG }),
+				create_stream_log(),
+				deps
+			)
 		);
 		assert.ok(err instanceof TaskError);
 		assert.include(err.message, '`repo_c` is missing at /test/repo_c');
@@ -104,7 +113,11 @@ describe('run_gitops_run', () => {
 		});
 		const log = create_stream_log();
 		const err = await assert_rejects(() =>
-			run_gitops_run(Args.parse({ _: ['npm', 'test'], config: CONFIG, format: 'json' }), log, deps)
+			run_gitops_run(
+				s.parse_or_throw(Args, { _: ['npm', 'test'], config: CONFIG, format: 'json' }),
+				log,
+				deps
+			)
 		);
 		assert.ok(err instanceof TaskError);
 		assert.strictEqual(err.message, '1 repos failed');
@@ -129,7 +142,12 @@ describe('run_gitops_run', () => {
 		});
 		const log = create_stream_log();
 		await assert_rejects(
-			() => run_gitops_run(Args.parse({ _: ['true'], config: CONFIG, format: 'json' }), log, deps),
+			() =>
+				run_gitops_run(
+					s.parse_or_throw(Args, { _: ['true'], config: CONFIG, format: 'json' }),
+					log,
+					deps
+				),
 			/3 repos failed/
 		);
 		const by_name = new Map(parse_json_output(log.stdout).repos.map((r) => [r.repo_name, r]));
@@ -157,7 +175,7 @@ describe('run_gitops_run', () => {
 		});
 		const log = create_stream_log();
 		await assert_rejects(() =>
-			run_gitops_run(Args.parse({ _: ['true'], config: CONFIG }), log, deps)
+			run_gitops_run(s.parse_or_throw(Args, { _: ['true'], config: CONFIG }), log, deps)
 		);
 		const errors = log.stderr.join('\n');
 		assert.include(errors, 'Killed by SIGKILL');
@@ -168,7 +186,7 @@ describe('run_gitops_run', () => {
 		const deps = create_deps();
 		const log = create_stream_log();
 		await run_gitops_run(
-			Args.parse({ _: ['echo', 'hi'], config: CONFIG, format: 'json', concurrency: 2 }),
+			s.parse_or_throw(Args, { _: ['echo', 'hi'], config: CONFIG, format: 'json', concurrency: 2 }),
 			log,
 			deps
 		);

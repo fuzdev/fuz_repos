@@ -2,6 +2,7 @@ import { assert, describe, test } from 'vitest';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import * as s from '@fuzdev/fuz_schema/schema.ts';
 
 import { Args, run_gitops_plan, type GitopsPlanDeps } from '#lib/gitops_plan.task.ts';
 import type { LocalRepo } from '#lib/local_repo.ts';
@@ -37,7 +38,7 @@ const create_deps = (): GitopsPlanDeps => ({
 describe('run_gitops_plan machine output', () => {
 	test('--format json: stdout carries the plan document alone', async () => {
 		const log = create_stream_log();
-		await run_gitops_plan(Args.parse({ format: 'json' }), log, create_deps());
+		await run_gitops_plan(s.parse_or_throw(Args, { format: 'json' }), log, create_deps());
 		assert.strictEqual(log.stdout.length, 1);
 		const plan = JSON.parse(log.stdout[0]!);
 		assert.deepEqual(plan.publishing_order, ['a', 'b']);
@@ -49,7 +50,7 @@ describe('run_gitops_plan machine output', () => {
 
 	test('--format markdown: stdout carries the markdown alone', async () => {
 		const log = create_stream_log();
-		await run_gitops_plan(Args.parse({ format: 'markdown' }), log, create_deps());
+		await run_gitops_plan(s.parse_or_throw(Args, { format: 'markdown' }), log, create_deps());
 		assert.strictEqual(log.stdout.length, 1);
 		assert.ok(log.stdout[0]!.startsWith('# Publishing Plan'));
 	});
@@ -59,7 +60,11 @@ describe('run_gitops_plan machine output', () => {
 		try {
 			const outfile = join(dir, 'plan.json');
 			const log = create_stream_log();
-			await run_gitops_plan(Args.parse({ format: 'json', outfile }), log, create_deps());
+			await run_gitops_plan(
+				s.parse_or_throw(Args, { format: 'json', outfile }),
+				log,
+				create_deps()
+			);
 			assert.ok(log.stdout.some((l) => l.includes('Generating multi-repo publishing plan')));
 			assert.ok(log.stdout.every((l) => !l.startsWith('{')));
 			assert.deepEqual(JSON.parse(await readFile(outfile, 'utf8')).publishing_order, ['a', 'b']);
@@ -70,7 +75,7 @@ describe('run_gitops_plan machine output', () => {
 
 	test('the human format logs on stdout', async () => {
 		const log = create_stream_log();
-		await run_gitops_plan(Args.parse({}), log, create_deps());
+		await run_gitops_plan(s.parse_or_throw(Args, {}), log, create_deps());
 		assert.ok(log.stdout.some((l) => l.includes('Generating multi-repo publishing plan')));
 	});
 });

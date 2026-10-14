@@ -1,6 +1,7 @@
 import { assert, describe, test } from 'vitest';
 import { assert_rejects } from '@fuzdev/fuz_util/testing.ts';
 import { TaskError } from '@fuzdev/gro';
+import * as s from '@fuzdev/fuz_schema/schema.ts';
 
 import {
 	Args,
@@ -104,7 +105,7 @@ describe('run_gitops_publish --wetrun', () => {
 			fetched_entries: [create_mock_repos_entry({ key: 'a' }), OFF_BRANCH]
 		});
 		const err = await assert_rejects(() =>
-			run_gitops_publish(Args.parse({ wetrun: true }), create_stream_log(), deps)
+			run_gitops_publish(s.parse_or_throw(Args, { wetrun: true }), create_stream_log(), deps)
 		);
 		assert.ok(err instanceof TaskError);
 		assert.include(err.message, 'b: on `feature`, not `main`');
@@ -123,7 +124,7 @@ describe('run_gitops_publish --wetrun', () => {
 			]
 		});
 		const outcome = await run_gitops_publish(
-			Args.parse({ wetrun: true }),
+			s.parse_or_throw(Args, { wetrun: true }),
 			create_stream_log(),
 			deps
 		);
@@ -157,7 +158,7 @@ describe('run_gitops_publish --wetrun', () => {
 			confirm: false
 		});
 		const log = create_stream_log();
-		const outcome = await run_gitops_publish(Args.parse({ wetrun: true }), log, deps);
+		const outcome = await run_gitops_publish(s.parse_or_throw(Args, { wetrun: true }), log, deps);
 		assert.strictEqual(outcome, 'cancelled');
 		assert.ok(
 			log.stdout.some((l) =>
@@ -174,13 +175,13 @@ describe('run_gitops_publish --wetrun', () => {
 		const b = create_mock_repo({ name: 'b', deps: { a: '^1.0.0' } });
 		const shown = create_recording_deps({ repos: [a, b], fetched_entries: [] });
 		await assert_rejects(() =>
-			run_gitops_publish(Args.parse({ wetrun: true }), create_stream_log(), shown.deps)
+			run_gitops_publish(s.parse_or_throw(Args, { wetrun: true }), create_stream_log(), shown.deps)
 		);
 		assert.deepEqual(shown.steps, ['load']);
 
 		const unshown = create_recording_deps({ repos: [a, b], fetched_entries: [] });
 		const outcome = await run_gitops_publish(
-			Args.parse({ wetrun: true, plan: false }),
+			s.parse_or_throw(Args, { wetrun: true, plan: false }),
 			create_stream_log(),
 			unshown.deps
 		);
@@ -199,7 +200,7 @@ describe('run_gitops_publish --wetrun', () => {
 			confirm: false
 		});
 		const outcome = await run_gitops_publish(
-			Args.parse({ wetrun: true }),
+			s.parse_or_throw(Args, { wetrun: true }),
 			create_stream_log(),
 			deps
 		);
@@ -218,7 +219,11 @@ describe('run_gitops_publish --wetrun', () => {
 		});
 		await assert_rejects(
 			() =>
-				run_gitops_publish(Args.parse({ wetrun: true, plan: false }), create_stream_log(), deps),
+				run_gitops_publish(
+					s.parse_or_throw(Args, { wetrun: true, plan: false }),
+					create_stream_log(),
+					deps
+				),
 			/a: fetching origin failed \(timed out after 60s\)/
 		);
 		assert.deepEqual(steps, ['load', 'repos status a b --fetch']);
@@ -230,7 +235,7 @@ describe('run_gitops_publish dry run', () => {
 		const repos = create_gate_repos(OFF_BRANCH);
 		const { deps, steps } = create_recording_deps({ repos, fetched_entries: [] });
 		const log = create_stream_log();
-		const outcome = await run_gitops_publish(Args.parse({}), log, deps);
+		const outcome = await run_gitops_publish(s.parse_or_throw(Args, {}), log, deps);
 		assert.strictEqual(outcome, 'done');
 		assert.deepEqual(steps, ['load']);
 		const block = log.stderr.join('\n');
@@ -242,7 +247,7 @@ describe('run_gitops_publish dry run', () => {
 		const repos = create_gate_repos();
 		const { deps } = create_recording_deps({ repos, fetched_entries: [] });
 		const log = create_stream_log();
-		await run_gitops_publish(Args.parse({}), log, deps);
+		await run_gitops_publish(s.parse_or_throw(Args, {}), log, deps);
 		assert.notInclude(log.stderr.join('\n'), 'not at rest');
 	});
 });
@@ -259,7 +264,7 @@ describe('run_gitops_publish machine output', () => {
 			fetched_entries: []
 		});
 		const log = create_stream_log();
-		const outcome = await run_gitops_publish(Args.parse({ format: 'json' }), log, deps);
+		const outcome = await run_gitops_publish(s.parse_or_throw(Args, { format: 'json' }), log, deps);
 		assert.strictEqual(outcome, 'done');
 		assert.strictEqual(log.stdout.length, 1);
 		const report = JSON.parse(log.stdout[0]!);
@@ -275,7 +280,7 @@ describe('run_gitops_publish machine output', () => {
 		});
 		const log = create_stream_log();
 		const outcome = await run_gitops_publish(
-			Args.parse({ wetrun: true, format: 'markdown' }),
+			s.parse_or_throw(Args, { wetrun: true, format: 'markdown' }),
 			log,
 			deps
 		);
@@ -296,7 +301,7 @@ describe('run_gitops_publish machine output', () => {
 		});
 		const log = create_stream_log();
 		const outcome = await run_gitops_publish(
-			Args.parse({ wetrun: true, emit_json: true }),
+			s.parse_or_throw(Args, { wetrun: true, emit_json: true }),
 			log,
 			deps
 		);
@@ -312,7 +317,7 @@ describe('run_gitops_publish machine output', () => {
 	test('the human format logs on stdout', async () => {
 		const { deps } = create_recording_deps({ repos: create_gate_repos(), fetched_entries: [] });
 		const log = create_stream_log();
-		await run_gitops_publish(Args.parse({}), log, deps);
+		await run_gitops_publish(s.parse_or_throw(Args, {}), log, deps);
 		assert.ok(log.stdout.length > 0);
 		assert.ok(log.stdout.every((l) => l.startsWith('[test]')));
 	});
@@ -332,7 +337,7 @@ describe('run_gitops_publish report masking', () => {
 		deps.ops = { ...deps.ops, process: { run_interactive: async () => SECRET_FAILURE } };
 		const log = create_stream_log();
 		const outcome = await run_gitops_publish(
-			Args.parse({ wetrun: true, plan: false, format }),
+			s.parse_or_throw(Args, { wetrun: true, plan: false, format }),
 			log,
 			deps
 		);
@@ -374,7 +379,7 @@ describe('run_gitops_publish report masking', () => {
 		};
 		const log = create_stream_log();
 		const outcome = await run_gitops_publish(
-			Args.parse({ wetrun: true, plan: false, format: 'json' }),
+			s.parse_or_throw(Args, { wetrun: true, plan: false, format: 'json' }),
 			log,
 			deps
 		);
@@ -396,7 +401,8 @@ describe('run_gitops_publish report masking', () => {
 
 describe('to_child_stdout', () => {
 	test('routes the child stdout to stderr when our stdout carries a machine stream', () => {
-		const route = (args: Partial<Args>): 'stdout' | 'stderr' => to_child_stdout(Args.parse(args));
+		const route = (args: Partial<Args>): 'stdout' | 'stderr' =>
+			to_child_stdout(s.parse_or_throw(Args, args));
 		assert.strictEqual(route({}), 'stdout');
 		assert.strictEqual(route({ emit_json: true }), 'stderr');
 		assert.strictEqual(route({ format: 'json' }), 'stderr');

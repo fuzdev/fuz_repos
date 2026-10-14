@@ -1,6 +1,7 @@
 import { TaskError, type Task } from '@fuzdev/gro';
 import type { Logger } from '@fuzdev/fuz_util/log.ts';
-import { z } from 'zod';
+import * as s from '@fuzdev/fuz_schema/schema.ts';
+import { meta } from '@fuzdev/fuz_schema/meta.ts';
 import { map_concurrent_settled } from '@fuzdev/fuz_util/async.ts';
 import { spawn_out } from '@fuzdev/fuz_util/process.ts';
 import { to_error_message } from '@fuzdev/fuz_util/error.ts';
@@ -14,34 +15,40 @@ import { default_repos_operations } from './operations_defaults.ts';
 import { output_is_machine, route_human_output } from './output_helpers.ts';
 
 /** @nodocs */
-export const Args = z.strictObject({
+export const Args = s.object({
 	// Positional rest args (gro convention) so `gro gitops_run "npm test"` works;
 	// joined with spaces and passed to `sh -c`, so quote commands that contain flags.
-	_: z.array(z.string()).meta({ description: 'shell command to run in each repo' }).default([]),
-	config: z
-		.string()
-		.meta({ description: 'path to the gitops config file' })
-		.default(GITOPS_CONFIG_PATH_DEFAULT),
-	registry: z
-		.string()
-		.meta({
+	_: s.with_default_fn(
+		meta(s.array(s.string), { description: 'shell command to run in each repo' }),
+		() => []
+	),
+	config: s.with_default(
+		meta(s.string, { description: 'path to the gitops config file' }),
+		GITOPS_CONFIG_PATH_DEFAULT
+	),
+	registry: s.optional(
+		meta(s.string, {
 			description:
 				'path to the repos.toml registry, when `repos` would not find it walking up from the cwd'
 		})
-		.optional(),
-	concurrency: z
-		.number()
-		.int()
-		.min(1)
-		.meta({ description: 'maximum number of repos to run in parallel' })
-		.default(GITOPS_CONCURRENCY_DEFAULT),
-	format: z.enum(['text', 'json']).meta({ description: 'output format' }).default('text'),
-	outfile: z
-		.string()
-		.meta({ description: 'with --format json, write clean JSON to this file instead of stdout' })
-		.optional()
+	),
+	concurrency: s.with_default(
+		meta(s.pipe(s.number, s.safe_integer, s.min_value(1)), {
+			description: 'maximum number of repos to run in parallel'
+		}),
+		GITOPS_CONCURRENCY_DEFAULT
+	),
+	format: s.with_default(
+		meta(s.one_of(['text', 'json']), { description: 'output format' }),
+		'text'
+	),
+	outfile: s.optional(
+		meta(s.string, {
+			description: 'with --format json, write clean JSON to this file instead of stdout'
+		})
+	)
 });
-export type Args = z.infer<typeof Args>;
+export type Args = s.Infer<typeof Args>;
 
 /**
  * How a command run in one repo ended: it exited with a code, a signal killed

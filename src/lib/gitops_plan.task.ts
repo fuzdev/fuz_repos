@@ -1,6 +1,7 @@
 import type { Task } from '@fuzdev/gro';
 import type { Logger } from '@fuzdev/fuz_util/log.ts';
-import { z } from 'zod';
+import * as s from '@fuzdev/fuz_schema/schema.ts';
+import { meta } from '@fuzdev/fuz_schema/meta.ts';
 import { styleText as st } from 'node:util';
 
 import {
@@ -26,26 +27,27 @@ import {
 import { GITOPS_CONFIG_PATH_DEFAULT } from './gitops_constants.ts';
 
 /** @nodocs */
-export const Args = z.strictObject({
-	config: z
-		.string()
-		.meta({ description: 'path to the gitops config file, absolute or relative to the cwd' })
-		.default(GITOPS_CONFIG_PATH_DEFAULT),
-	registry: z
-		.string()
-		.meta({
+export const Args = s.object({
+	config: s.with_default(
+		meta(s.string, {
+			description: 'path to the gitops config file, absolute or relative to the cwd'
+		}),
+		GITOPS_CONFIG_PATH_DEFAULT
+	),
+	registry: s.optional(
+		meta(s.string, {
 			description:
 				'path to the repos.toml registry, when `repos` would not find it walking up from the cwd'
 		})
-		.optional(),
-	format: z
-		.enum(['stdout', 'json', 'markdown'])
-		.meta({ description: 'output format' })
-		.default('stdout'),
-	outfile: z.string().meta({ description: 'write output to file instead of logging' }).optional(),
-	verbose: z.boolean().meta({ description: 'show additional details' }).default(false)
+	),
+	format: s.with_default(
+		meta(s.one_of(['stdout', 'json', 'markdown']), { description: 'output format' }),
+		'stdout'
+	),
+	outfile: s.optional(meta(s.string, { description: 'write output to file instead of logging' })),
+	verbose: s.with_default(meta(s.boolean, { description: 'show additional details' }), false)
 });
-export type Args = z.infer<typeof Args>;
+export type Args = s.Infer<typeof Args>;
 
 /**
  * Generate a publishing plan showing what would happen during multi-repo publishing.

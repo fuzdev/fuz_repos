@@ -748,7 +748,7 @@ the old base.
 - `@fuzdev/fuz_css` - semantic-first CSS framework and design system
 - `@sveltejs/kit` - web framework
 - `svelte` - UI framework
-- `@fuzdev/fuz_schema` - the tasks' `Args` schemas, which Gro parses
+- `@fuzdev/fuz_schema` - the tasks' `Args` schemas, which Gro parses, and the `package.json` read without analysis
 - `zod` - schema validation for everything else: `repos` output, GitHub data, the config, publishing events
 
 ## General Patterns

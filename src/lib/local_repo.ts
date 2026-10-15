@@ -1,6 +1,7 @@
 import { to_error_message } from '@fuzdev/fuz_util/error.ts';
 import { library_json_from_modules, type LibraryJson } from '@fuzdev/fuz_util/library_json.ts';
 import { PackageJson } from '@fuzdev/fuz_util/package_json.ts';
+import * as s from '@fuzdev/fuz_schema/schema.ts';
 import type { Result } from '@fuzdev/fuz_util/result.ts';
 import { Library } from '@fuzdev/fuz_ui/library.svelte.ts';
 import { existsSync } from 'node:fs';
@@ -218,7 +219,10 @@ const library_load_manifest = async (
 	repo_dir: string
 ): Promise<{ library_json: LibraryJson; package_json: PackageJson }> => {
 	const package_json_path = join(repo_dir, 'package.json');
-	const package_json = PackageJson.parse(JSON.parse(await readFile(package_json_path, 'utf8')));
+	const package_json = s.parse_or_throw(
+		PackageJson,
+		JSON.parse(await readFile(package_json_path, 'utf8'))
+	);
 	if (!package_json.name) throw Error(`missing \`name\` in ${package_json_path}`);
 	if (!package_json.version) throw Error(`missing \`version\` in ${package_json_path}`);
 	return { library_json: library_json_from_modules(package_json, []), package_json };

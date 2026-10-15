@@ -1,5 +1,6 @@
 import { assert, describe, test } from 'vitest';
 import { assert_rejects } from '@fuzdev/fuz_util/testing.ts';
+import type { ExportValue } from '@fuzdev/fuz_util/package_json.ts';
 import { TaskError } from '@fuzdev/gro';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -415,7 +416,11 @@ describe('serialize_repos_json', () => {
 	test('a package.json object the library data shares stays whole', () => {
 		const repo = create_mock_repo({ name: 'a' });
 		// `pkg_json_from_package_json` picks shallowly, so `exports` is one object in both
-		const exports = { './a.ts': { svelte: false, default: './a.js' }, './b.ts': [] };
+		// `false` and `[]` aren't export values, they're what the replacer drops
+		const exports = {
+			'./a.ts': { svelte: false, default: './a.js' },
+			'./b.ts': []
+		} as unknown as Record<string, ExportValue>;
 		const package_json = { ...repo.package_json, exports };
 		const library_json = {
 			...repo.library.library_json,

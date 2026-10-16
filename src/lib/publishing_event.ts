@@ -14,13 +14,14 @@
  * @module
  */
 
-import { z } from 'zod';
+import * as s from '@fuzdev/fuz_schema/schema.ts';
+import { meta } from '@fuzdev/fuz_schema/meta.ts';
 
 /**
  * Coarse triage classification for a failed package. Lets consumers branch on
  * failure kind without parsing the message.
  */
-export const PublishingErrorCode = z.enum([
+export const PublishingErrorCode = s.one_of([
 	// the publish step failed — its cause is in the message, not yet classified further
 	'publish',
 	// the published version never appeared on the npm registry within the wait
@@ -33,88 +34,88 @@ export const PublishingErrorCode = z.enum([
 	// a tracked edit, a live session, …) — aborted before any npm side effect
 	'not_ready'
 ]);
-export type PublishingErrorCode = z.infer<typeof PublishingErrorCode>;
+export type PublishingErrorCode = s.Infer<typeof PublishingErrorCode>;
 
 /** Tallied outcome of a publishing run, derived from its events via `summarize_events`. */
-export const PublishingRunSummary = z.strictObject({
-	total: z.number().meta({ description: 'packages in the publishing order (the candidate set)' }),
-	published: z.number().meta({ description: 'packages published (or, in a dry run, predicted)' }),
-	failed: z.number(),
-	skipped: z.number(),
-	duration: z.number().meta({ description: 'wall-clock duration in milliseconds' })
+export const PublishingRunSummary = s.object({
+	total: meta(s.number, { description: 'packages in the publishing order (the candidate set)' }),
+	published: meta(s.number, { description: 'packages published (or, in a dry run, predicted)' }),
+	failed: s.number,
+	skipped: s.number,
+	duration: meta(s.number, { description: 'wall-clock duration in milliseconds' })
 });
-export type PublishingRunSummary = z.infer<typeof PublishingRunSummary>;
+export type PublishingRunSummary = s.Infer<typeof PublishingRunSummary>;
 
 /**
  * A single structured event emitted during a publishing run. Tagged on `event` so the
  * union serializes as one self-describing JSON object per event (JSON-lines on the wire).
  */
-export const PublishingEvent = z.discriminatedUnion('event', [
-	z.strictObject({
-		event: z.literal('run_started'),
-		wetrun: z
-			.boolean()
-			.meta({ description: 'false means every package_completed is a prediction' }),
-		total: z.number()
+export const PublishingEvent = s.variant('event', [
+	s.object({
+		event: s.literal('run_started'),
+		wetrun: meta(s.boolean, {
+			description: 'false means every package_completed is a prediction'
+		}),
+		total: s.number
 	}),
-	z.strictObject({
-		event: z.literal('package_skipped'),
-		name: z.string(),
-		reason: z.string()
+	s.object({
+		event: s.literal('package_skipped'),
+		name: s.string,
+		reason: s.string
 	}),
-	z.strictObject({
-		event: z.literal('package_completed'),
-		name: z.string(),
-		old_version: z.string(),
-		new_version: z.string(),
+	s.object({
+		event: s.literal('package_completed'),
+		name: s.string,
+		old_version: s.string,
+		new_version: s.string,
 		// mirrors `BumpType` from `version_utils.ts`; inline so the event schema is self-contained
-		bump_type: z.enum(['major', 'minor', 'patch']),
-		breaking: z.boolean(),
-		commit: z.string().meta({ description: "'simulated' in a dry run, otherwise the commit hash" }),
-		tag: z.string()
+		bump_type: s.one_of(['major', 'minor', 'patch']),
+		breaking: s.boolean,
+		commit: meta(s.string, { description: "'simulated' in a dry run, otherwise the commit hash" }),
+		tag: s.string
 	}),
-	z.strictObject({
-		event: z.literal('npm_waited'),
-		name: z.string(),
-		version: z.string().meta({ description: 'the version waited on after publishing' })
+	s.object({
+		event: s.literal('npm_waited'),
+		name: s.string,
+		version: meta(s.string, { description: 'the version waited on after publishing' })
 	}),
-	z.strictObject({
-		event: z.literal('package_failed'),
-		name: z.string(),
-		error: z.string(),
+	s.object({
+		event: s.literal('package_failed'),
+		name: s.string,
+		error: s.string,
 		code: PublishingErrorCode
 	}),
-	z.strictObject({
-		event: z.literal('dependency_updated'),
-		dependent: z.string(),
-		dependency: z.string(),
-		version: z.string(),
+	s.object({
+		event: s.literal('dependency_updated'),
+		dependent: s.string,
+		dependency: s.string,
+		version: s.string,
 		// 'prod'/'peer' updates run inline in the publish pass; 'dev' updates run in the later
 		// dev-dependency pass. Lets a consumer reconstruct which side-effect phase this is.
-		dep_type: z.enum(['prod', 'peer', 'dev']),
+		dep_type: s.one_of(['prod', 'peer', 'dev']),
 		// true when the update creates an auto-changeset (a publishable dependent republishes);
 		// false for dev-dep updates and update-only leaves (private dependents never publish).
-		creates_changeset: z.boolean()
+		creates_changeset: s.boolean
 	}),
-	z.strictObject({
-		event: z.literal('deploy_started'),
-		name: z.string()
+	s.object({
+		event: s.literal('deploy_started'),
+		name: s.string
 	}),
-	z.strictObject({
-		event: z.literal('deploy_completed'),
-		name: z.string()
+	s.object({
+		event: s.literal('deploy_completed'),
+		name: s.string
 	}),
-	z.strictObject({
-		event: z.literal('deploy_failed'),
-		name: z.string(),
-		error: z.string()
+	s.object({
+		event: s.literal('deploy_failed'),
+		name: s.string,
+		error: s.string
 	}),
-	z.strictObject({
-		event: z.literal('run_finished'),
+	s.object({
+		event: s.literal('run_finished'),
 		summary: PublishingRunSummary
 	})
 ]);
-export type PublishingEvent = z.infer<typeof PublishingEvent>;
+export type PublishingEvent = s.Infer<typeof PublishingEvent>;
 
 /**
  * Derives a run summary from the captured event list — the single canonical path from

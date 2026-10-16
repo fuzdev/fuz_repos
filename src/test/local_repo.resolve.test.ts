@@ -1,10 +1,12 @@
 import { assert, describe, test } from 'vitest';
+import * as s from '@fuzdev/fuz_schema/schema.ts';
 
 import { local_repos_resolve } from '#lib/local_repo.ts';
 import { ReposStatusReport } from '#lib/repos_status.ts';
 import { create_mock_repos_entry, create_mock_repos_report, load_golden } from './test_helpers.ts';
 
-const load_report = (name: string): ReposStatusReport => ReposStatusReport.parse(load_golden(name));
+const load_report = (name: string): ReposStatusReport =>
+	s.parse_or_throw(ReposStatusReport, load_golden(name));
 
 // the full report: present repos, a reference, a missing entry, one not a repo, a failed probe
 const report = load_report('status_report.json');

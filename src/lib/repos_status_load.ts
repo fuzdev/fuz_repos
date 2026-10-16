@@ -13,7 +13,7 @@
  */
 
 import type { Result } from '@fuzdev/fuz_util/result.ts';
-import { z } from 'zod';
+import { format_issue, parse, type SchemaIssue } from '@fuzdev/fuz_schema/schema.ts';
 
 import {
 	REPOS_STATUS_FORMAT_VERSION,
@@ -95,29 +95,33 @@ export const parse_repos_status_output = (
 	}
 
 	if ('error' in json) {
-		const parsed = ReposStatusErrorReport.safeParse(json);
-		if (!parsed.success) {
+		const parsed = parse(ReposStatusErrorReport, json);
+		if (!parsed.ok) {
 			return {
 				ok: false,
-				message: `\`repos status --json\` printed an error document this package can't parse:\n${z.prettifyError(parsed.error)}`
+				message: `\`repos status --json\` printed an error document this package can't parse:\n${format_issues(parsed.issues)}`
 			};
 		}
 		return {
 			ok: false,
-			message: format_repos_status_error(parsed.data.error),
-			error: parsed.data.error
+			message: format_repos_status_error(parsed.value.error),
+			error: parsed.value.error
 		};
 	}
 
-	const parsed = ReposStatusReport.safeParse(json);
-	if (!parsed.success) {
+	const parsed = parse(ReposStatusReport, json);
+	if (!parsed.ok) {
 		return {
 			ok: false,
-			message: `\`repos status --json\` printed a report this package can't parse:\n${z.prettifyError(parsed.error)}`
+			message: `\`repos status --json\` printed a report this package can't parse:\n${format_issues(parsed.issues)}`
 		};
 	}
-	return { ok: true, report: parsed.data };
+	return { ok: true, report: parsed.value };
 };
+
+// one issue a line, indented under the message
+const format_issues = (issues: Array<SchemaIssue>): string =>
+	issues.map((issue) => `  ${format_issue(issue)}`).join('\n');
 
 const format_repos_status_error = (error: ReposStatusErrorBody): string => {
 	switch (error.kind) {

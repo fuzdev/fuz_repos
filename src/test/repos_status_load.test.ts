@@ -1,4 +1,5 @@
 import { assert, describe, test } from 'vitest';
+import * as s from '@fuzdev/fuz_schema/schema.ts';
 import { readdirSync } from 'node:fs';
 
 import {
@@ -73,7 +74,7 @@ describe('parse_repos_status_output', () => {
 
 	describe('error documents', () => {
 		test.each(ERROR_GOLDENS)('%s maps to a message', (name) => {
-			const { error } = ReposStatusErrorReport.parse(load_golden(name));
+			const { error } = s.parse_or_throw(ReposStatusErrorReport, load_golden(name));
 			const message = failure_of(read_golden(name));
 			switch (error.kind) {
 				case 'unknown_entry':

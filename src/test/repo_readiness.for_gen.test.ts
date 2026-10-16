@@ -1,4 +1,5 @@
 import { assert, describe, test } from 'vitest';
+import * as s from '@fuzdev/fuz_schema/schema.ts';
 
 import { check_gen_readiness, repo_readiness_for_gen } from '#lib/repo_readiness.ts';
 import { ReposStatusReport } from '#lib/repos_status.ts';
@@ -148,7 +149,7 @@ describe('check_gen_readiness', () => {
 	});
 
 	test('every golden entry reads and formats without throwing', () => {
-		const report = ReposStatusReport.parse(load_golden('status_report.json'));
+		const report = s.parse_or_throw(ReposStatusReport, load_golden('status_report.json'));
 		const keys = report.entries.map((e) => e.key);
 		for (const allow_dirty of [false, true]) {
 			const checked = check_gen_readiness({ report, keys, allow_dirty });

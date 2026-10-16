@@ -1,4 +1,5 @@
 import { assert, describe, test } from 'vitest';
+import * as s from '@fuzdev/fuz_schema/schema.ts';
 
 import {
 	check_publish_readiness,
@@ -244,7 +245,7 @@ describe('repo_readiness_for_publish', () => {
 	});
 
 	test('every golden entry reads and formats without throwing', () => {
-		const report = ReposStatusReport.parse(load_golden('status_report.json'));
+		const report = s.parse_or_throw(ReposStatusReport, load_golden('status_report.json'));
 		for (const entry of report.entries) {
 			for (const problem of repo_readiness_for_publish(entry)) {
 				const { what, fix } = format_repo_readiness_problem(entry.key, problem);
@@ -345,15 +346,13 @@ describe('check_publish_readiness', () => {
 	});
 
 	test('refuses when busy detection is unavailable, for each golden reason', () => {
-		const sessions = (load_golden('sessions.json') as Array<unknown>).map((s) =>
-			ReposSessions.parse(s)
-		);
-		const unavailable = sessions.filter((s) => s.kind === 'unavailable');
+		const sessions = s.parse_or_throw(s.array(ReposSessions), load_golden('sessions.json'));
+		const unavailable = sessions.filter((session) => session.kind === 'unavailable');
 		assert.ok(unavailable.length > 0);
-		for (const s of unavailable) {
+		for (const session of unavailable) {
 			const report = create_mock_repos_report([create_mock_repos_entry({ key: 'a' })], {
 				fetched: true,
-				sessions: s
+				sessions: session
 			});
 			const checked = check_publish_readiness({ report, keys: ['a'] });
 			assert.ok(!checked.ok);

@@ -1,4 +1,5 @@
 import { assert, describe, test } from 'vitest';
+import * as s from '@fuzdev/fuz_schema/schema.ts';
 import { assert_rejects } from '@fuzdev/fuz_util/testing.ts';
 import type { ExportValue } from '@fuzdev/fuz_util/package_json.ts';
 import { TaskError } from '@fuzdev/gro';
@@ -397,7 +398,7 @@ describe('serialize_repos_json', () => {
 			{ number: 2, title: 'wip', user: { login: 'u' }, draft: true }
 		];
 		const [written] = await write_and_read(pulls);
-		assert.deepEqual(GithubPullRequests.parse(written!.pull_requests), pulls);
+		assert.deepEqual(s.parse_or_throw(GithubPullRequests, written!.pull_requests), pulls);
 	});
 
 	test('no open pull requests stays an empty array, apart from a failed fetch', async () => {

@@ -1,7 +1,7 @@
 import type { Logger } from '@fuzdev/fuz_util/log.ts';
-import { z } from 'zod';
 import { fetch_value, type FetchValueCache } from '@fuzdev/fuz_util/fetch.ts';
 import type { Result } from '@fuzdev/fuz_util/result.ts';
+import * as s from '@fuzdev/fuz_schema/schema.ts';
 
 /**
  * Minimal interface for GitHub API calls, satisfied structurally by fuz_ui's `Library`.
@@ -11,20 +11,24 @@ export interface GithubRepoInfo {
 	repo_name: string;
 }
 
+// GitHub's responses carry many more fields than these, and add fields over
+// time, so the objects accept unknown keys and drop them: what's kept is
+// written into the generated `repos.json`, which carries only these
+
 /**
  * @see https://docs.github.com/en/rest/pulls/pulls?apiVersion=2022-11-28#list-pull-requests
  */
-export const GithubPullRequest = z.object({
-	number: z.number(),
-	title: z.string(),
-	user: z.object({
-		login: z.string()
+export const GithubPullRequest = s.strip_object({
+	number: s.number,
+	title: s.string,
+	user: s.strip_object({
+		login: s.string
 	}),
-	draft: z.boolean()
+	draft: s.boolean
 });
-export type GithubPullRequest = z.infer<typeof GithubPullRequest>;
-export const GithubPullRequests = z.array(GithubPullRequest);
-export type GithubPullRequests = z.infer<typeof GithubPullRequests>;
+export type GithubPullRequest = s.Infer<typeof GithubPullRequest>;
+export const GithubPullRequests = s.array(GithubPullRequest);
+export type GithubPullRequests = s.Infer<typeof GithubPullRequests>;
 
 /**
  * @see https://docs.github.com/en/rest/pulls/pulls?apiVersion=2022-11-28#list-pull-requests
@@ -45,7 +49,7 @@ export const fetch_github_pull_requests = async (
 	const url = `https://api.github.com/repos/${repo_info.owner_name}/${repo_info.repo_name}/pulls`;
 	const fetched = await fetch_value(url, {
 		request: { headers },
-		parse: GithubPullRequests.parse,
+		parse: (v) => s.parse_or_throw(GithubPullRequests, v),
 		token,
 		cache,
 		log,
@@ -66,18 +70,26 @@ export const fetch_github_pull_requests = async (
 /**
  * @see https://docs.github.com/en/rest/checks/runs?apiVersion=2022-11-28#list-check-runs-for-a-git-reference
  */
-export const GithubCheckRunsItem = z.object({
-	status: z.enum(['queued', 'in_progress', 'completed']),
-	conclusion: z
-		.enum(['success', 'failure', 'neutral', 'cancelled', 'skipped', 'timed_out', 'action_required'])
-		.nullable()
+export const GithubCheckRunsItem = s.strip_object({
+	status: s.one_of(['queued', 'in_progress', 'completed']),
+	conclusion: s.nullable(
+		s.one_of([
+			'success',
+			'failure',
+			'neutral',
+			'cancelled',
+			'skipped',
+			'timed_out',
+			'action_required'
+		])
+	)
 });
-export type GithubCheckRunsItem = z.infer<typeof GithubCheckRunsItem>;
-export const GithubCheckRuns = z.object({
-	total_count: z.number(),
-	check_runs: z.array(GithubCheckRunsItem)
+export type GithubCheckRunsItem = s.Infer<typeof GithubCheckRunsItem>;
+export const GithubCheckRuns = s.strip_object({
+	total_count: s.number,
+	check_runs: s.array(GithubCheckRunsItem)
 });
-export type GithubCheckRuns = z.infer<typeof GithubCheckRuns>;
+export type GithubCheckRuns = s.Infer<typeof GithubCheckRuns>;
 
 /**
  * Fetches the check runs on `ref` and reduces them to one overall status and
@@ -106,7 +118,7 @@ export const fetch_github_check_runs = async (
 	const url = `https://api.github.com/repos/${repo_info.owner_name}/${repo_info.repo_name}/commits/${ref}/check-runs`;
 	const fetched = await fetch_value(url, {
 		request: { headers },
-		parse: (v) => reduce_check_runs(GithubCheckRuns.parse(v).check_runs),
+		parse: (v) => reduce_check_runs(s.parse_or_throw(GithubCheckRuns, v).check_runs),
 		token,
 		cache,
 		log,

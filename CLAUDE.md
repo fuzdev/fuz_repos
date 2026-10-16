@@ -273,7 +273,7 @@ Every `src/lib` module is listed here or under
 - `src/lib/gitops_constants.ts` - the tasks' defaults
 - `src/lib/output_helpers.ts`, `src/lib/log_helpers.ts` - report formats,
   stdout routing, and log formatting
-- `src/lib/repos_status.ts` - zod mirror of the `repos status --json`
+- `src/lib/repos_status.ts` - fuz_schema mirror of the `repos status --json`
   document (report and error document), guarded by the goldens
 - `crates/fuz_repos/` - the Rust `repos` tool: a library — registry, git
   runner, probe, unregistered scan, busy detection, classification, sync,
@@ -748,8 +748,7 @@ the old base.
 - `@fuzdev/fuz_css` - semantic-first CSS framework and design system
 - `@sveltejs/kit` - web framework
 - `svelte` - UI framework
-- `@fuzdev/fuz_schema` - the tasks' `Args` schemas, which Gro parses, and the `package.json` read without analysis
-- `zod` - schema validation for everything else: `repos` output, GitHub data, the config, publishing events
+- `@fuzdev/fuz_schema` - every schema: the tasks' `Args`, which Gro parses, the `package.json` read without analysis, `repos` output, GitHub data, the config, and publishing events
 
 ## General Patterns
 

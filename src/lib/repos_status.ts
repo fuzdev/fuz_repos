@@ -1,5 +1,5 @@
 /**
- * Zod schemas for the `repos status --json` document, the report the Rust
+ * Schemas for the `repos status --json` document, the report the Rust
  * `repos` tool (`crates/fuz_repos`) prints, and the error document it prints
  * in place of the report on a fatal error.
  *
@@ -35,7 +35,8 @@
  * @module
  */
 
-import { z } from 'zod';
+import * as s from '@fuzdev/fuz_schema/schema.ts';
+import { meta } from '@fuzdev/fuz_schema/meta.ts';
 
 /**
  * The `repos status --json` document's format version, Rust's
@@ -44,93 +45,93 @@ import { z } from 'zod';
 export const REPOS_STATUS_FORMAT_VERSION = 19;
 
 // u32 and u64 on the Rust side
-const Count = z.number().int().nonnegative();
-const UnixSeconds = z.number().int().nonnegative().meta({ description: 'a time in unix seconds' });
+const Count = s.pipe(s.number, s.safe_integer, s.min_value(0));
+const UnixSeconds = meta(Count, { description: 'a time in unix seconds' });
 
 // --- sessions ---
 
 /** Where a live Claude Code session was recorded. */
-export const ReposSessionSource = z.enum(['session_file', 'roster_worker']);
-export type ReposSessionSource = z.infer<typeof ReposSessionSource>;
+export const ReposSessionSource = s.one_of(['session_file', 'roster_worker']);
+export type ReposSessionSource = s.Infer<typeof ReposSessionSource>;
 
 /** A live Claude Code session: its process, and where it works. */
-export const ReposSession = z.strictObject({
+export const ReposSession = s.object({
 	pid: Count,
-	cwd: z.string(),
-	worktree: z.string().nullable(),
-	process_cwd: z.string().nullable(),
+	cwd: s.string,
+	worktree: s.nullable(s.string),
+	process_cwd: s.nullable(s.string),
 	source: ReposSessionSource
 });
-export type ReposSession = z.infer<typeof ReposSession>;
+export type ReposSession = s.Infer<typeof ReposSession>;
 
 /** Why busy detection can't vouch for every live session. */
-export const ReposUnavailable = z.discriminatedUnion('kind', [
-	z.strictObject({ kind: z.literal('home_unknown') }),
-	z.strictObject({ kind: z.literal('relative_config_dir'), path: z.string() }),
-	z.strictObject({ kind: z.literal('unreadable'), path: z.string(), error: z.string() }),
-	z.strictObject({ kind: z.literal('unparseable'), path: z.string(), error: z.string() }),
-	z.strictObject({
-		kind: z.literal('foreign_pid_domain'),
-		path: z.string(),
-		pid_domain: z.string(),
+export const ReposUnavailable = s.variant('kind', [
+	s.object({ kind: s.literal('home_unknown') }),
+	s.object({ kind: s.literal('relative_config_dir'), path: s.string }),
+	s.object({ kind: s.literal('unreadable'), path: s.string, error: s.string }),
+	s.object({ kind: s.literal('unparseable'), path: s.string, error: s.string }),
+	s.object({
+		kind: s.literal('foreign_pid_domain'),
+		path: s.string,
+		pid_domain: s.string,
 		source: ReposSessionSource
 	})
 ]);
-export type ReposUnavailable = z.infer<typeof ReposUnavailable>;
+export type ReposUnavailable = s.Infer<typeof ReposUnavailable>;
 
 /** Busy detection as the report carries it. */
-export const ReposSessions = z.discriminatedUnion('kind', [
-	z.strictObject({ kind: z.literal('available'), unscoped: z.array(ReposSession) }),
-	z.strictObject({ kind: z.literal('unavailable'), reason: ReposUnavailable })
+export const ReposSessions = s.variant('kind', [
+	s.object({ kind: s.literal('available'), unscoped: s.array(ReposSession) }),
+	s.object({ kind: s.literal('unavailable'), reason: ReposUnavailable })
 ]);
-export type ReposSessions = z.infer<typeof ReposSessions>;
+export type ReposSessions = s.Infer<typeof ReposSessions>;
 
 // --- registry ---
 
 /** Which registry table an entry comes from. */
-export const ReposEntryKind = z.enum(['repo', 'reference']);
-export type ReposEntryKind = z.infer<typeof ReposEntryKind>;
+export const ReposEntryKind = s.one_of(['repo', 'reference']);
+export type ReposEntryKind = s.Infer<typeof ReposEntryKind>;
 
 /** A repo's declared visibility on its host. */
-export const ReposVisibility = z.enum(['public', 'private']);
-export type ReposVisibility = z.infer<typeof ReposVisibility>;
+export const ReposVisibility = s.one_of(['public', 'private']);
+export type ReposVisibility = s.Infer<typeof ReposVisibility>;
 
 /** A repo's list of the sibling checkouts it uses. */
-export const ReposCheckoutList = z.enum(['requires', 'consults']);
-export type ReposCheckoutList = z.infer<typeof ReposCheckoutList>;
+export const ReposCheckoutList = s.one_of(['requires', 'consults']);
+export type ReposCheckoutList = s.Infer<typeof ReposCheckoutList>;
 
 /** An entry by table and key. */
-export const ReposEntryName = z.strictObject({ kind: ReposEntryKind, key: z.string() });
-export type ReposEntryName = z.infer<typeof ReposEntryName>;
+export const ReposEntryName = s.object({ kind: ReposEntryKind, key: s.string });
+export type ReposEntryName = s.Infer<typeof ReposEntryName>;
 
 /** A registry integrity rule broken. */
-export const ReposRegistryIssue = z.discriminatedUnion('kind', [
-	z.strictObject({ kind: z.literal('repo_not_owned'), key: z.string(), account: z.string() }),
-	z.strictObject({ kind: z.literal('fork_not_owned'), key: z.string() }),
-	z.strictObject({ kind: z.literal('dir_not_a_name'), entry: ReposEntryName, dir: z.string() }),
-	z.strictObject({
-		kind: z.literal('dir_claimed_twice'),
-		dir: z.string(),
+export const ReposRegistryIssue = s.variant('kind', [
+	s.object({ kind: s.literal('repo_not_owned'), key: s.string, account: s.string }),
+	s.object({ kind: s.literal('fork_not_owned'), key: s.string }),
+	s.object({ kind: s.literal('dir_not_a_name'), entry: ReposEntryName, dir: s.string }),
+	s.object({
+		kind: s.literal('dir_claimed_twice'),
+		dir: s.string,
 		first: ReposEntryName,
 		second: ReposEntryName
 	}),
-	z.strictObject({ kind: z.literal('key_in_both'), key: z.string() }),
-	z.strictObject({ kind: z.literal('key_is_other_dir'), key: z.string(), entry: ReposEntryName }),
-	z.strictObject({
-		kind: z.literal('unknown_checkout_ref'),
-		key: z.string(),
+	s.object({ kind: s.literal('key_in_both'), key: s.string }),
+	s.object({ kind: s.literal('key_is_other_dir'), key: s.string, entry: ReposEntryName }),
+	s.object({
+		kind: s.literal('unknown_checkout_ref'),
+		key: s.string,
 		field: ReposCheckoutList,
-		target: z.string()
+		target: s.string
 	}),
-	z.strictObject({ kind: z.literal('self_ref'), key: z.string(), field: ReposCheckoutList }),
-	z.strictObject({ kind: z.literal('requires_and_consults'), key: z.string(), target: z.string() })
+	s.object({ kind: s.literal('self_ref'), key: s.string, field: ReposCheckoutList }),
+	s.object({ kind: s.literal('requires_and_consults'), key: s.string, target: s.string })
 ]);
-export type ReposRegistryIssue = z.infer<typeof ReposRegistryIssue>;
+export type ReposRegistryIssue = s.Infer<typeof ReposRegistryIssue>;
 
 // --- verdicts ---
 
 /** What holds a branch's action back. */
-export const ReposBranchHold = z.enum([
+export const ReposBranchHold = s.one_of([
 	'pinned',
 	'entry',
 	'push_url',
@@ -141,58 +142,58 @@ export const ReposBranchHold = z.enum([
 	'busy',
 	'busy_unknown'
 ]);
-export type ReposBranchHold = z.infer<typeof ReposBranchHold>;
+export type ReposBranchHold = s.Infer<typeof ReposBranchHold>;
 
 /** What holds a reference's refresh back. */
-export const ReposRefreshHold = z.enum(['pinned', 'entry', 'origin_not_https']);
-export type ReposRefreshHold = z.infer<typeof ReposRefreshHold>;
+export const ReposRefreshHold = s.one_of(['pinned', 'entry', 'origin_not_https']);
+export type ReposRefreshHold = s.Infer<typeof ReposRefreshHold>;
 
 /** What holds a missing entry's clone back. */
-export const ReposCloneHold = z.enum(['entry', 'busy', 'unprobed_worktree']);
-export type ReposCloneHold = z.infer<typeof ReposCloneHold>;
+export const ReposCloneHold = s.one_of(['entry', 'busy', 'unprobed_worktree']);
+export type ReposCloneHold = s.Infer<typeof ReposCloneHold>;
 
 /** What a run does about refreshing a third-party reference or a pin. */
-export const ReposRefreshVerdict = z.discriminatedUnion('kind', [
-	z.strictObject({ kind: z.literal('act') }),
-	z.strictObject({ kind: z.literal('held'), by: ReposRefreshHold })
+export const ReposRefreshVerdict = s.variant('kind', [
+	s.object({ kind: s.literal('act') }),
+	s.object({ kind: s.literal('held'), by: ReposRefreshHold })
 ]);
-export type ReposRefreshVerdict = z.infer<typeof ReposRefreshVerdict>;
+export type ReposRefreshVerdict = s.Infer<typeof ReposRefreshVerdict>;
 
 /** Whether a repo is at the entry's dir. */
-export const ReposPresence = z.discriminatedUnion('kind', [
-	z.strictObject({ kind: z.literal('present') }),
-	z.strictObject({ kind: z.literal('missing') }),
-	z.strictObject({ kind: z.literal('not_a_repo') })
+export const ReposPresence = s.variant('kind', [
+	s.object({ kind: s.literal('present') }),
+	s.object({ kind: s.literal('missing') }),
+	s.object({ kind: s.literal('not_a_repo') })
 ]);
-export type ReposPresence = z.infer<typeof ReposPresence>;
+export type ReposPresence = s.Infer<typeof ReposPresence>;
 
 /** How sync would clone a missing entry. */
-export const ReposCloneRecipe = z.strictObject({
-	url: z.string(),
-	branch: z.string().nullable(),
-	shallow: z.boolean(),
-	sparse: z.string().nullable()
+export const ReposCloneRecipe = s.object({
+	url: s.string,
+	branch: s.nullable(s.string),
+	shallow: s.boolean,
+	sparse: s.nullable(s.string)
 });
-export type ReposCloneRecipe = z.infer<typeof ReposCloneRecipe>;
+export type ReposCloneRecipe = s.Infer<typeof ReposCloneRecipe>;
 
 /** What sync does about a missing entry: clone it, or why not yet. */
-export const ReposCloneVerdict = z.discriminatedUnion('kind', [
-	z.strictObject({ kind: z.literal('act'), recipe: ReposCloneRecipe }),
-	z.strictObject({ kind: z.literal('held'), recipe: ReposCloneRecipe, by: ReposCloneHold })
+export const ReposCloneVerdict = s.variant('kind', [
+	s.object({ kind: s.literal('act'), recipe: ReposCloneRecipe }),
+	s.object({ kind: s.literal('held'), recipe: ReposCloneRecipe, by: ReposCloneHold })
 ]);
-export type ReposCloneVerdict = z.infer<typeof ReposCloneVerdict>;
+export type ReposCloneVerdict = s.Infer<typeof ReposCloneVerdict>;
 
 /** A sync action on a branch. */
-export const ReposSyncAction = z.discriminatedUnion('kind', [
-	z.strictObject({ kind: z.literal('push'), commits: Count }),
-	z.strictObject({ kind: z.literal('fast_forward'), commits: Count }),
-	z.strictObject({ kind: z.literal('move') }),
-	z.strictObject({ kind: z.literal('rebase'), ahead: Count, behind: Count })
+export const ReposSyncAction = s.variant('kind', [
+	s.object({ kind: s.literal('push'), commits: Count }),
+	s.object({ kind: s.literal('fast_forward'), commits: Count }),
+	s.object({ kind: s.literal('move') }),
+	s.object({ kind: s.literal('rebase'), ahead: Count, behind: Count })
 ]);
-export type ReposSyncAction = z.infer<typeof ReposSyncAction>;
+export type ReposSyncAction = s.Infer<typeof ReposSyncAction>;
 
 /** Why a branch is left to a person. */
-export const ReposBranchNeedsHuman = z.enum([
+export const ReposBranchNeedsHuman = s.one_of([
 	'diverged',
 	'diverged_published',
 	'diverged_merge',
@@ -202,58 +203,58 @@ export const ReposBranchNeedsHuman = z.enum([
 	'shallow_local_work',
 	'upstream_not_a_branch'
 ]);
-export type ReposBranchNeedsHuman = z.infer<typeof ReposBranchNeedsHuman>;
+export type ReposBranchNeedsHuman = s.Infer<typeof ReposBranchNeedsHuman>;
 
 /** Why a branch reads as cleanup. */
-export const ReposCleanupReason = z.enum(['merged', 'upstream_gone']);
-export type ReposCleanupReason = z.infer<typeof ReposCleanupReason>;
+export const ReposCleanupReason = s.one_of(['merged', 'upstream_gone']);
+export type ReposCleanupReason = s.Infer<typeof ReposCleanupReason>;
 
 /** What sync does about a branch. */
-export const ReposVerdict = z.discriminatedUnion('kind', [
-	z.strictObject({ kind: z.literal('quiet') }),
-	z.strictObject({ kind: z.literal('act'), action: ReposSyncAction }),
-	z.strictObject({ kind: z.literal('held'), action: ReposSyncAction, by: ReposBranchHold }),
-	z.strictObject({ kind: z.literal('needs_human'), reason: ReposBranchNeedsHuman }),
-	z.strictObject({ kind: z.literal('local_only') }),
-	z.strictObject({
-		kind: z.literal('cleanup'),
+export const ReposVerdict = s.variant('kind', [
+	s.object({ kind: s.literal('quiet') }),
+	s.object({ kind: s.literal('act'), action: ReposSyncAction }),
+	s.object({ kind: s.literal('held'), action: ReposSyncAction, by: ReposBranchHold }),
+	s.object({ kind: s.literal('needs_human'), reason: ReposBranchNeedsHuman }),
+	s.object({ kind: s.literal('local_only') }),
+	s.object({
+		kind: s.literal('cleanup'),
 		reason: ReposCleanupReason,
-		removable_worktree: z.string().nullable()
+		removable_worktree: s.nullable(s.string)
 	})
 ]);
-export type ReposVerdict = z.infer<typeof ReposVerdict>;
+export type ReposVerdict = s.Infer<typeof ReposVerdict>;
 
 // --- checkouts and branches ---
 
 /** A clone's shape: shallow, sparse, or partial. */
-export const ReposLayout = z.strictObject({
-	shallow: z.boolean(),
-	sparse: z.boolean(),
-	partial_filter: z.string().nullable()
+export const ReposLayout = s.object({
+	shallow: s.boolean,
+	sparse: s.boolean,
+	partial_filter: s.nullable(s.string)
 });
-export type ReposLayout = z.infer<typeof ReposLayout>;
+export type ReposLayout = s.Infer<typeof ReposLayout>;
 
 /**
  * A checkout's HEAD: a probed checkout's, an unprobed worktree's, or an
  * unlisted git dir's — the last two `null` when it can't be read.
  */
-export const ReposHead = z.discriminatedUnion('kind', [
-	z.strictObject({ kind: z.literal('branch'), name: z.string() }),
-	z.strictObject({ kind: z.literal('detached'), commit: z.string() })
+export const ReposHead = s.variant('kind', [
+	s.object({ kind: s.literal('branch'), name: s.string }),
+	s.object({ kind: s.literal('detached'), commit: s.string })
 ]);
-export type ReposHead = z.infer<typeof ReposHead>;
+export type ReposHead = s.Infer<typeof ReposHead>;
 
 /** A checkout's uncommitted work, by kind. */
-export const ReposUncommitted = z.strictObject({
+export const ReposUncommitted = s.object({
 	staged: Count,
 	unstaged: Count,
 	untracked: Count,
 	conflicted: Count
 });
-export type ReposUncommitted = z.infer<typeof ReposUncommitted>;
+export type ReposUncommitted = s.Infer<typeof ReposUncommitted>;
 
 /** A git operation in progress. */
-export const ReposInProgressOp = z.enum([
+export const ReposInProgressOp = s.one_of([
 	'rebase',
 	'merge',
 	'cherry_pick',
@@ -262,194 +263,195 @@ export const ReposInProgressOp = z.enum([
 	'sequencer',
 	'am'
 ]);
-export type ReposInProgressOp = z.infer<typeof ReposInProgressOp>;
+export type ReposInProgressOp = s.Infer<typeof ReposInProgressOp>;
 
 /** One checkout of a repo: its primary, or a linked worktree probed. */
-export const ReposCheckout = z.strictObject({
-	path: z.string(),
-	primary: z.boolean(),
+export const ReposCheckout = s.object({
+	path: s.string,
+	primary: s.boolean,
 	head: ReposHead,
 	uncommitted: ReposUncommitted,
-	in_progress: ReposInProgressOp.nullable(),
-	locked: z.boolean(),
-	linked: z.boolean(),
-	submodules: z.boolean().nullable(),
-	busy: z.array(ReposSession)
+	in_progress: s.nullable(ReposInProgressOp),
+	locked: s.boolean,
+	linked: s.boolean,
+	submodules: s.nullable(s.boolean),
+	busy: s.array(ReposSession)
 });
-export type ReposCheckout = z.infer<typeof ReposCheckout>;
+export type ReposCheckout = s.Infer<typeof ReposCheckout>;
 
 /** A branch's relation to its upstream. */
-export const ReposRelation = z.discriminatedUnion('kind', [
-	z.strictObject({ kind: z.literal('in_sync') }),
-	z.strictObject({ kind: z.literal('ahead'), commits: Count }),
-	z.strictObject({ kind: z.literal('behind'), commits: Count }),
-	z.strictObject({ kind: z.literal('diverged'), ahead: Count, behind: Count }),
-	z.strictObject({ kind: z.literal('shallow') }),
-	z.strictObject({ kind: z.literal('gone') }),
-	z.strictObject({ kind: z.literal('unmapped') }),
-	z.strictObject({ kind: z.literal('untracked') })
+export const ReposRelation = s.variant('kind', [
+	s.object({ kind: s.literal('in_sync') }),
+	s.object({ kind: s.literal('ahead'), commits: Count }),
+	s.object({ kind: s.literal('behind'), commits: Count }),
+	s.object({ kind: s.literal('diverged'), ahead: Count, behind: Count }),
+	s.object({ kind: s.literal('shallow') }),
+	s.object({ kind: s.literal('gone') }),
+	s.object({ kind: s.literal('unmapped') }),
+	s.object({ kind: s.literal('untracked') })
 ]);
-export type ReposRelation = z.infer<typeof ReposRelation>;
+export type ReposRelation = s.Infer<typeof ReposRelation>;
 
 /** One local branch and its verdict. */
-export const ReposBranchStatus = z.strictObject({
-	name: z.string(),
-	upstream: z.string().nullable(),
-	worktree: z.string().nullable(),
-	symref: z.string().nullable(),
+export const ReposBranchStatus = s.object({
+	name: s.string,
+	upstream: s.nullable(s.string),
+	worktree: s.nullable(s.string),
+	symref: s.nullable(s.string),
 	unique_commits: Count,
 	newest_commit_at: UnixSeconds,
 	relation: ReposRelation,
 	verdict: ReposVerdict
 });
-export type ReposBranchStatus = z.infer<typeof ReposBranchStatus>;
+export type ReposBranchStatus = s.Infer<typeof ReposBranchStatus>;
 
 /** Whether an entry's primary checkout sits where the registry puts it. */
-export const ReposAtRest = z.strictObject({
-	on_branch: z.boolean().nullable(),
-	clean: z.boolean(),
-	idle: z.boolean(),
-	followed: ReposRelation.nullable()
+export const ReposAtRest = s.object({
+	on_branch: s.nullable(s.boolean),
+	clean: s.boolean,
+	idle: s.boolean,
+	followed: s.nullable(ReposRelation)
 });
-export type ReposAtRest = z.infer<typeof ReposAtRest>;
+export type ReposAtRest = s.Infer<typeof ReposAtRest>;
 
 // --- worktrees not probed ---
 
 /** Why a worktree wasn't probed. */
-export const ReposUnprobedWhy = z.discriminatedUnion('kind', [
-	z.strictObject({ kind: z.literal('prunable') }),
-	z.strictObject({ kind: z.literal('missing') }),
-	z.strictObject({ kind: z.literal('failed'), error: z.string() })
+export const ReposUnprobedWhy = s.variant('kind', [
+	s.object({ kind: s.literal('prunable') }),
+	s.object({ kind: s.literal('missing') }),
+	s.object({ kind: s.literal('failed'), error: s.string })
 ]);
-export type ReposUnprobedWhy = z.infer<typeof ReposUnprobedWhy>;
+export type ReposUnprobedWhy = s.Infer<typeof ReposUnprobedWhy>;
 
 /** What an unprobed worktree's git dir holds that a prune would lose. */
-export const ReposGitDirHolds = z.strictObject({
-	submodules: z.boolean(),
-	worktree_refs: z.boolean(),
-	staged: z.boolean().nullable()
+export const ReposGitDirHolds = s.object({
+	submodules: s.boolean,
+	worktree_refs: s.boolean,
+	staged: s.nullable(s.boolean)
 });
-export type ReposGitDirHolds = z.infer<typeof ReposGitDirHolds>;
+export type ReposGitDirHolds = s.Infer<typeof ReposGitDirHolds>;
 
 /** What pruning an unprobed worktree would lose. */
-export const ReposPruneLoss = z.discriminatedUnion('kind', [
-	z.strictObject({ kind: z.literal('operation'), op: ReposInProgressOp }),
-	z.strictObject({ kind: z.literal('detached_head') }),
-	z.strictObject({ kind: z.literal('unknown_head') }),
-	z.strictObject({ kind: z.literal('missing_branch'), name: z.string() }),
-	z.strictObject({ kind: z.literal('submodules') }),
-	z.strictObject({ kind: z.literal('worktree_refs') }),
-	z.strictObject({ kind: z.literal('staged_changes') }),
-	z.strictObject({ kind: z.literal('unmatched_git_dir') }),
-	z.strictObject({ kind: z.literal('relative_gitdir'), git_dir: z.string() })
+export const ReposPruneLoss = s.variant('kind', [
+	s.object({ kind: s.literal('operation'), op: ReposInProgressOp }),
+	s.object({ kind: s.literal('detached_head') }),
+	s.object({ kind: s.literal('unknown_head') }),
+	s.object({ kind: s.literal('missing_branch'), name: s.string }),
+	s.object({ kind: s.literal('submodules') }),
+	s.object({ kind: s.literal('worktree_refs') }),
+	s.object({ kind: s.literal('staged_changes') }),
+	s.object({ kind: s.literal('unmatched_git_dir') }),
+	s.object({ kind: s.literal('relative_gitdir'), git_dir: s.string })
 ]);
-export type ReposPruneLoss = z.infer<typeof ReposPruneLoss>;
+export type ReposPruneLoss = s.Infer<typeof ReposPruneLoss>;
 
 /** Whether pruning an unprobed worktree is safe. */
-export const ReposPrune = z.discriminatedUnion('kind', [
-	z.strictObject({ kind: z.literal('safe') }),
-	z.strictObject({ kind: z.literal('loses'), losses: z.array(ReposPruneLoss) }),
-	z.strictObject({ kind: z.literal('moved'), to: z.array(z.string()) })
+export const ReposPrune = s.variant('kind', [
+	s.object({ kind: s.literal('safe') }),
+	s.object({ kind: s.literal('loses'), losses: s.array(ReposPruneLoss) }),
+	s.object({ kind: s.literal('moved'), to: s.array(s.string) })
 ]);
-export type ReposPrune = z.infer<typeof ReposPrune>;
+export type ReposPrune = s.Infer<typeof ReposPrune>;
 
 /** A worktree of the repo that couldn't be probed. */
-export const ReposUnprobedWorktree = z.strictObject({
-	path: z.string(),
-	git_dir: z.string().nullable(),
-	head: ReposHead.nullable().meta({ description: 'null when its HEAD cannot be read' }),
-	locked: z.boolean(),
-	in_progress: ReposInProgressOp.nullable(),
+export const ReposUnprobedWorktree = s.object({
+	path: s.string,
+	git_dir: s.nullable(s.string),
+	head: meta(s.nullable(ReposHead), { description: 'null when its HEAD cannot be read' }),
+	locked: s.boolean,
+	in_progress: s.nullable(ReposInProgressOp),
 	why: ReposUnprobedWhy,
-	holds: ReposGitDirHolds.nullable()
+	holds: s.nullable(ReposGitDirHolds)
 });
-export type ReposUnprobedWorktree = z.infer<typeof ReposUnprobedWorktree>;
+export type ReposUnprobedWorktree = s.Infer<typeof ReposUnprobedWorktree>;
 
 /** An unprobed worktree (flattened) with its prune verdict and live sessions. */
-export const ReposUnprobedWorktreeStatus = ReposUnprobedWorktree.extend({
-	prune: ReposPrune.nullable(),
-	busy: z.array(ReposSession)
+export const ReposUnprobedWorktreeStatus = s.object({
+	...ReposUnprobedWorktree.def,
+	prune: s.nullable(ReposPrune),
+	busy: s.array(ReposSession)
 });
-export type ReposUnprobedWorktreeStatus = z.infer<typeof ReposUnprobedWorktreeStatus>;
+export type ReposUnprobedWorktreeStatus = s.Infer<typeof ReposUnprobedWorktreeStatus>;
 
 // --- remotes ---
 
 /** The `origin` remote as git sees it, when it isn't the registry's `url`. */
-export const ReposOriginRemote = z.discriminatedUnion('kind', [
-	z.strictObject({ kind: z.literal('url'), url: z.string() }),
-	z.strictObject({ kind: z.literal('no_url') }),
-	z.strictObject({ kind: z.literal('missing') })
+export const ReposOriginRemote = s.variant('kind', [
+	s.object({ kind: s.literal('url'), url: s.string }),
+	s.object({ kind: s.literal('no_url') }),
+	s.object({ kind: s.literal('missing') })
 ]);
-export type ReposOriginRemote = z.infer<typeof ReposOriginRemote>;
+export type ReposOriginRemote = s.Infer<typeof ReposOriginRemote>;
 
 /** Why no `git remote` command fits an origin's fix. */
-export const ReposOriginByHand = z.enum([
+export const ReposOriginByHand = s.one_of([
 	'outside_repo_file',
 	'valueless_url',
 	'empty_value',
 	'several_urls'
 ]);
-export type ReposOriginByHand = z.infer<typeof ReposOriginByHand>;
+export type ReposOriginByHand = s.Infer<typeof ReposOriginByHand>;
 
 /** How to point `origin` at the registry's URL. */
-export const ReposOriginFix = z.discriminatedUnion('kind', [
-	z.strictObject({ kind: z.literal('add') }),
-	z.strictObject({ kind: z.literal('set_url') }),
-	z.strictObject({ kind: z.literal('by_hand'), reason: ReposOriginByHand })
+export const ReposOriginFix = s.variant('kind', [
+	s.object({ kind: s.literal('add') }),
+	s.object({ kind: s.literal('set_url') }),
+	s.object({ kind: s.literal('by_hand'), reason: ReposOriginByHand })
 ]);
-export type ReposOriginFix = z.infer<typeof ReposOriginFix>;
+export type ReposOriginFix = s.Infer<typeof ReposOriginFix>;
 
 /** Why a remote couldn't be reached. */
-export const ReposUnreachableCause = z.enum(['dns', 'connection', 'host_key', 'auth']);
-export type ReposUnreachableCause = z.infer<typeof ReposUnreachableCause>;
+export const ReposUnreachableCause = s.one_of(['dns', 'connection', 'host_key', 'auth']);
+export type ReposUnreachableCause = s.Infer<typeof ReposUnreachableCause>;
 
 /** How to repair a fetch refspec naming a ref gone from origin. */
-export const ReposRefGoneFix = z.discriminatedUnion('kind', [
-	z.strictObject({ kind: z.literal('unset_refspec'), pattern: z.string() }),
-	z.strictObject({ kind: z.literal('set_branches'), branch: z.string().nullable() }),
-	z.strictObject({ kind: z.literal('by_hand') })
+export const ReposRefGoneFix = s.variant('kind', [
+	s.object({ kind: s.literal('unset_refspec'), pattern: s.string }),
+	s.object({ kind: s.literal('set_branches'), branch: s.nullable(s.string) }),
+	s.object({ kind: s.literal('by_hand') })
 ]);
-export type ReposRefGoneFix = z.infer<typeof ReposRefGoneFix>;
+export type ReposRefGoneFix = s.Infer<typeof ReposRefGoneFix>;
 
 /**
  * Why a fetch or the visibility check failed, or why the tool refused to
  * fetch: Rust's `RemoteFailure` without `rejected`, which only a push meets.
  */
-export const ReposFetchFailure = z.discriminatedUnion('kind', [
-	z.strictObject({ kind: z.literal('ref_gone'), refname: z.string(), fix: ReposRefGoneFix }),
-	z.strictObject({
-		kind: z.literal('unreachable'),
+export const ReposFetchFailure = s.variant('kind', [
+	s.object({ kind: s.literal('ref_gone'), refname: s.string, fix: ReposRefGoneFix }),
+	s.object({
+		kind: s.literal('unreachable'),
 		cause: ReposUnreachableCause,
-		message: z.string()
+		message: s.string
 	}),
-	z.strictObject({ kind: z.literal('repo_not_found'), message: z.string() }),
-	z.strictObject({
-		kind: z.literal('timed_out'),
-		after_secs: Count.meta({ description: "the runner's timeout in seconds" })
+	s.object({ kind: s.literal('repo_not_found'), message: s.string }),
+	s.object({
+		kind: s.literal('timed_out'),
+		after_secs: meta(Count, { description: "the runner's timeout in seconds" })
 	}),
-	z.strictObject({ kind: z.literal('failed'), message: z.string() }),
-	z.strictObject({ kind: z.literal('refspec_outside_origin'), refspec: z.string() }),
-	z.strictObject({
-		kind: z.literal('origin_refs_shared'),
-		remote: z.string(),
-		refspec: z.string()
+	s.object({ kind: s.literal('failed'), message: s.string }),
+	s.object({ kind: s.literal('refspec_outside_origin'), refspec: s.string }),
+	s.object({
+		kind: s.literal('origin_refs_shared'),
+		remote: s.string,
+		refspec: s.string
 	}),
-	z.strictObject({ kind: z.literal('legacy_remotes_unreadable'), path: z.string() })
+	s.object({ kind: s.literal('legacy_remotes_unreadable'), path: s.string })
 ]);
-export type ReposFetchFailure = z.infer<typeof ReposFetchFailure>;
+export type ReposFetchFailure = s.Infer<typeof ReposFetchFailure>;
 
 /** What an anonymous read of a repo declared private found. */
-export const ReposVisibilityCheck = z.discriminatedUnion('kind', [
-	z.strictObject({ kind: z.literal('leak') }),
-	z.strictObject({ kind: z.literal('private') }),
-	z.strictObject({ kind: z.literal('unknown'), failure: ReposFetchFailure })
+export const ReposVisibilityCheck = s.variant('kind', [
+	s.object({ kind: s.literal('leak') }),
+	s.object({ kind: s.literal('private') }),
+	s.object({ kind: s.literal('unknown'), failure: ReposFetchFailure })
 ]);
-export type ReposVisibilityCheck = z.infer<typeof ReposVisibilityCheck>;
+export type ReposVisibilityCheck = s.Infer<typeof ReposVisibilityCheck>;
 
 // --- entries ---
 
 /** What kind of failure stopped an entry's probe. */
-export const ReposProbeErrorKind = z.enum([
+export const ReposProbeErrorKind = s.one_of([
 	'path_unreadable',
 	'non_utf8_path',
 	'config_unreadable',
@@ -460,168 +462,167 @@ export const ReposProbeErrorKind = z.enum([
 	'git_failed',
 	'unexpected_output'
 ]);
-export type ReposProbeErrorKind = z.infer<typeof ReposProbeErrorKind>;
+export type ReposProbeErrorKind = s.Infer<typeof ReposProbeErrorKind>;
 
 /** Why an entry's probe failed: its kind, and a message for display. */
-export const ReposProbeError = z.strictObject({
+export const ReposProbeError = s.object({
 	kind: ReposProbeErrorKind,
-	message: z.string()
+	message: s.string
 });
-export type ReposProbeError = z.infer<typeof ReposProbeError>;
+export type ReposProbeError = s.Infer<typeof ReposProbeError>;
 
 /** Why sync would stop on an entry and leave it to a person. */
-export const ReposNeedsHuman = z.discriminatedUnion('kind', [
-	z.strictObject({ kind: z.literal('not_a_repo'), detail: z.string() }),
-	z.strictObject({
-		kind: z.literal('operation_in_progress'),
-		checkout: z.string(),
+export const ReposNeedsHuman = s.variant('kind', [
+	s.object({ kind: s.literal('not_a_repo'), detail: s.string }),
+	s.object({
+		kind: s.literal('operation_in_progress'),
+		checkout: s.string,
 		op: ReposInProgressOp
 	}),
-	z.strictObject({
-		kind: z.literal('origin_mismatch'),
+	s.object({
+		kind: s.literal('origin_mismatch'),
 		origin: ReposOriginRemote,
-		expected: z.string(),
+		expected: s.string,
 		fix: ReposOriginFix
 	}),
-	z.strictObject({
-		kind: z.literal('origin_not_https'),
-		fetch_url: z.string(),
-		expected: z.string(),
-		fix: ReposOriginFix.nullable()
+	s.object({
+		kind: s.literal('origin_not_https'),
+		fetch_url: s.string,
+		expected: s.string,
+		fix: s.nullable(ReposOriginFix)
 	}),
-	z.strictObject({
-		kind: z.literal('fetch_url_mismatch'),
-		fetch_url: z.string(),
-		expected: z.string(),
-		fix: ReposOriginFix.nullable()
+	s.object({
+		kind: s.literal('fetch_url_mismatch'),
+		fetch_url: s.string,
+		expected: s.string,
+		fix: s.nullable(ReposOriginFix)
 	}),
-	z.strictObject({ kind: z.literal('worktree_unreadable'), path: z.string() }),
-	z.strictObject({ kind: z.literal('default_branch_missing'), branch: z.string() }),
-	z.strictObject({ kind: z.literal('default_branch_no_upstream'), branch: z.string() }),
-	z.strictObject({ kind: z.literal('default_branch_gone'), branch: z.string() }),
-	z.strictObject({ kind: z.literal('unexpected_detached'), checkout: z.string() }),
-	z.strictObject({
-		kind: z.literal('checkout_unresolvable'),
-		checkout: z.string(),
-		path: z.string(),
-		error: z.string()
+	s.object({ kind: s.literal('worktree_unreadable'), path: s.string }),
+	s.object({ kind: s.literal('default_branch_missing'), branch: s.string }),
+	s.object({ kind: s.literal('default_branch_no_upstream'), branch: s.string }),
+	s.object({ kind: s.literal('default_branch_gone'), branch: s.string }),
+	s.object({ kind: s.literal('unexpected_detached'), checkout: s.string }),
+	s.object({
+		kind: s.literal('checkout_unresolvable'),
+		checkout: s.string,
+		path: s.string,
+		error: s.string
 	}),
-	z.strictObject({
-		kind: z.literal('unlisted_git_dir'),
-		git_dir: z.string(),
-		head: ReposHead.nullable().meta({ description: 'null when its HEAD cannot be read' }),
-		busy: z.array(ReposSession)
+	s.object({
+		kind: s.literal('unlisted_git_dir'),
+		git_dir: s.string,
+		head: meta(s.nullable(ReposHead), { description: 'null when its HEAD cannot be read' }),
+		busy: s.array(ReposSession)
 	}),
-	z.strictObject({
-		kind: z.literal('push_url_mismatch'),
-		push_urls: z.array(z.string()),
-		expected: z.string()
+	s.object({
+		kind: s.literal('push_url_mismatch'),
+		push_urls: s.array(s.string),
+		expected: s.string
 	}),
-	z.strictObject({ kind: z.literal('clone_shares_repo'), with: z.string() }),
-	z.strictObject({ kind: z.literal('cloned_unregistered'), dir: z.string() })
+	s.object({ kind: s.literal('clone_shares_repo'), with: s.string }),
+	s.object({ kind: s.literal('cloned_unregistered'), dir: s.string })
 ]);
-export type ReposNeedsHuman = z.infer<typeof ReposNeedsHuman>;
+export type ReposNeedsHuman = s.Infer<typeof ReposNeedsHuman>;
 
 /** One registry entry's state. */
-export const ReposEntryStatus = z.strictObject({
-	key: z.string(),
+export const ReposEntryStatus = s.object({
+	key: s.string,
 	kind: ReposEntryKind,
-	dir: z.string(),
-	url: z.string(),
-	writable: z.boolean(),
-	archived: z.boolean(),
-	visibility: ReposVisibility.nullable(),
-	ci: z.boolean(),
-	branch: z.string().nullable(),
-	pinned: z.boolean(),
-	refresh: ReposRefreshVerdict.nullable(),
+	dir: s.string,
+	url: s.string,
+	writable: s.boolean,
+	archived: s.boolean,
+	visibility: s.nullable(ReposVisibility),
+	ci: s.boolean,
+	branch: s.nullable(s.string),
+	pinned: s.boolean,
+	refresh: s.nullable(ReposRefreshVerdict),
 	presence: ReposPresence,
-	clone: ReposCloneVerdict.nullable(),
-	layout: ReposLayout.nullable(),
-	checkouts: z.array(ReposCheckout),
-	branches: z.array(ReposBranchStatus),
-	at_rest: ReposAtRest.nullable(),
+	clone: s.nullable(ReposCloneVerdict),
+	layout: s.nullable(ReposLayout),
+	checkouts: s.array(ReposCheckout),
+	branches: s.array(ReposBranchStatus),
+	at_rest: s.nullable(ReposAtRest),
 	stashes: Count,
-	fetched_at: UnixSeconds.nullable(),
-	needs_human: z.array(ReposNeedsHuman),
-	probe_error: ReposProbeError.nullable(),
-	unprobed_worktrees: z.array(ReposUnprobedWorktreeStatus),
-	fetch_error: ReposFetchFailure.nullable(),
-	visibility_check: ReposVisibilityCheck.nullable()
+	fetched_at: s.nullable(UnixSeconds),
+	needs_human: s.array(ReposNeedsHuman),
+	probe_error: s.nullable(ReposProbeError),
+	unprobed_worktrees: s.array(ReposUnprobedWorktreeStatus),
+	fetch_error: s.nullable(ReposFetchFailure),
+	visibility_check: s.nullable(ReposVisibilityCheck)
 });
-export type ReposEntryStatus = z.infer<typeof ReposEntryStatus>;
+export type ReposEntryStatus = s.Infer<typeof ReposEntryStatus>;
 
 // --- unregistered clones ---
 
 /** What keeps a moved worktree's repair from being offered. */
-export const ReposRepairBlock = z.discriminatedUnion('kind', [
-	z.strictObject({ kind: z.literal('rewrites'), path: z.string(), git_dir: z.string() }),
-	z.strictObject({ kind: z.literal('claimed_dir'), git_dir: z.string() }),
-	z.strictObject({ kind: z.literal('swapped'), git_dir: z.string(), with: z.string() }),
-	z.strictObject({ kind: z.literal('relative_gitdir'), git_dir: z.string() }),
-	z.strictObject({ kind: z.literal('unreadable_gitdir'), git_dir: z.string() }),
-	z.strictObject({ kind: z.literal('non_utf8_path') }),
-	z.strictObject({ kind: z.literal('nul_in_gitdir'), git_dir: z.string() })
+export const ReposRepairBlock = s.variant('kind', [
+	s.object({ kind: s.literal('rewrites'), path: s.string, git_dir: s.string }),
+	s.object({ kind: s.literal('claimed_dir'), git_dir: s.string }),
+	s.object({ kind: s.literal('swapped'), git_dir: s.string, with: s.string }),
+	s.object({ kind: s.literal('relative_gitdir'), git_dir: s.string }),
+	s.object({ kind: s.literal('unreadable_gitdir'), git_dir: s.string }),
+	s.object({ kind: s.literal('non_utf8_path') }),
+	s.object({ kind: s.literal('nul_in_gitdir'), git_dir: s.string })
 ]);
-export type ReposRepairBlock = z.infer<typeof ReposRepairBlock>;
+export type ReposRepairBlock = s.Infer<typeof ReposRepairBlock>;
 
 // `UnregisteredClone`'s own fields, beside its flattened `UnregisteredKind`
 const unregistered_clone_fields = {
-	dir: z.string(),
-	origin: z.string().nullable(),
-	owned: z.boolean()
+	dir: s.string,
+	origin: s.nullable(s.string),
+	owned: s.boolean
 };
 
 /**
  * A child of the workspace root holding a `.git` that no registry entry
  * claims, its `kind` flattened beside its own fields.
  */
-export const ReposUnregisteredClone = z.discriminatedUnion('kind', [
-	z.strictObject({ ...unregistered_clone_fields, kind: z.literal('clone') }),
-	z.strictObject({ ...unregistered_clone_fields, kind: z.literal('worktree') }),
-	z.strictObject({
+export const ReposUnregisteredClone = s.variant('kind', [
+	s.object({ ...unregistered_clone_fields, kind: s.literal('clone') }),
+	s.object({ ...unregistered_clone_fields, kind: s.literal('worktree') }),
+	s.object({
 		...unregistered_clone_fields,
-		kind: z.literal('moved_worktree'),
-		entry: z.string(),
-		blocked_by: ReposRepairBlock.nullable(),
-		exit_noise: z.string().nullable()
+		kind: s.literal('moved_worktree'),
+		entry: s.string,
+		blocked_by: s.nullable(ReposRepairBlock),
+		exit_noise: s.nullable(s.string)
 	}),
-	z.strictObject({
+	s.object({
 		...unregistered_clone_fields,
-		kind: z.literal('orphaned_worktree'),
-		entry: z.string()
+		kind: s.literal('orphaned_worktree'),
+		entry: s.string
 	}),
-	z.strictObject({
+	s.object({
 		...unregistered_clone_fields,
-		kind: z.literal('shared_git_dir'),
-		entry: z.string(),
-		with: z.string().nullable()
+		kind: s.literal('shared_git_dir'),
+		entry: s.string,
+		with: s.nullable(s.string)
 	}),
-	z.strictObject({ ...unregistered_clone_fields, kind: z.literal('unfinished_clone') })
+	s.object({ ...unregistered_clone_fields, kind: s.literal('unfinished_clone') })
 ]);
-export type ReposUnregisteredClone = z.infer<typeof ReposUnregisteredClone>;
+export type ReposUnregisteredClone = s.Infer<typeof ReposUnregisteredClone>;
 
 // --- the documents ---
 
 /** The `repos status --json` report. */
-export const ReposStatusReport = z.strictObject({
-	version: z.literal(REPOS_STATUS_FORMAT_VERSION),
-	workspace: z.string(),
-	registry: z.string(),
-	fetched: z.boolean(),
+export const ReposStatusReport = s.object({
+	version: s.literal(REPOS_STATUS_FORMAT_VERSION),
+	workspace: s.string,
+	registry: s.string,
+	fetched: s.boolean,
 	sessions: ReposSessions,
-	entries: z.array(ReposEntryStatus),
-	unregistered: z
-		.array(ReposUnregisteredClone)
-		.nullable()
-		.meta({ description: 'null when the scan did not run (a run with targets)' })
+	entries: s.array(ReposEntryStatus),
+	unregistered: meta(s.nullable(s.array(ReposUnregisteredClone)), {
+		description: 'null when the scan did not run (a run with targets)'
+	})
 });
-export type ReposStatusReport = z.infer<typeof ReposStatusReport>;
+export type ReposStatusReport = s.Infer<typeof ReposStatusReport>;
 
 // `ErrorBody`'s own fields, beside its flattened `ErrorKind`
 const error_body_fields = {
-	message: z.string(),
-	hint: z.string().nullable()
+	message: s.string,
+	hint: s.nullable(s.string)
 };
 
 /**
@@ -629,41 +630,41 @@ const error_body_fields = {
  * beside `message` and `hint`. Only the kinds `status` can print: the rest
  * of Rust's `ErrorKind` are `repos push`'s, or precede knowing `--json`.
  */
-export const ReposStatusErrorBody = z.discriminatedUnion('kind', [
-	z.strictObject({ ...error_body_fields, kind: z.literal('references_with_targets') }),
-	z.strictObject({ ...error_body_fields, kind: z.literal('root_not_found') }),
-	z.strictObject({ ...error_body_fields, kind: z.literal('registry_not_found') }),
-	z.strictObject({ ...error_body_fields, kind: z.literal('root_in_entry'), key: z.string() }),
-	z.strictObject({ ...error_body_fields, kind: z.literal('registry_read') }),
-	z.strictObject({ ...error_body_fields, kind: z.literal('registry_parse') }),
-	z.strictObject({
+export const ReposStatusErrorBody = s.variant('kind', [
+	s.object({ ...error_body_fields, kind: s.literal('references_with_targets') }),
+	s.object({ ...error_body_fields, kind: s.literal('root_not_found') }),
+	s.object({ ...error_body_fields, kind: s.literal('registry_not_found') }),
+	s.object({ ...error_body_fields, kind: s.literal('root_in_entry'), key: s.string }),
+	s.object({ ...error_body_fields, kind: s.literal('registry_read') }),
+	s.object({ ...error_body_fields, kind: s.literal('registry_parse') }),
+	s.object({
 		...error_body_fields,
-		kind: z.literal('registry_invalid'),
-		issues: z.array(ReposRegistryIssue)
+		kind: s.literal('registry_invalid'),
+		issues: s.array(ReposRegistryIssue)
 	}),
-	z.strictObject({ ...error_body_fields, kind: z.literal('git_not_found') }),
-	z.strictObject({
+	s.object({ ...error_body_fields, kind: s.literal('git_not_found') }),
+	s.object({
 		...error_body_fields,
-		kind: z.literal('git_too_old'),
-		found: z.string(),
-		required: z.string()
+		kind: s.literal('git_too_old'),
+		found: s.string,
+		required: s.string
 	}),
-	z.strictObject({
+	s.object({
 		...error_body_fields,
-		kind: z.literal('unknown_entry'),
-		name: z.string(),
-		suggestions: z.array(z.string())
+		kind: s.literal('unknown_entry'),
+		name: s.string,
+		suggestions: s.array(s.string)
 	}),
-	z.strictObject({ ...error_body_fields, kind: z.literal('io') })
+	s.object({ ...error_body_fields, kind: s.literal('io') })
 ]);
-export type ReposStatusErrorBody = z.infer<typeof ReposStatusErrorBody>;
+export type ReposStatusErrorBody = s.Infer<typeof ReposStatusErrorBody>;
 
 /** The document `repos status --json` prints on a fatal error, in place of the report. */
-export const ReposStatusErrorReport = z.strictObject({
-	version: z.literal(REPOS_STATUS_FORMAT_VERSION),
+export const ReposStatusErrorReport = s.object({
+	version: s.literal(REPOS_STATUS_FORMAT_VERSION),
 	error: ReposStatusErrorBody
 });
-export type ReposStatusErrorReport = z.infer<typeof ReposStatusErrorReport>;
+export type ReposStatusErrorReport = s.Infer<typeof ReposStatusErrorReport>;
 
 /**
  * Either document `repos status --json` prints. No tag is needed: `error`
@@ -671,5 +672,5 @@ export type ReposStatusErrorReport = z.infer<typeof ReposStatusErrorReport>;
  * other's fields. A consumer wanting a sharper parse error branches on
  * `error` first and parses with that side's schema.
  */
-export const ReposStatusDocument = z.union([ReposStatusReport, ReposStatusErrorReport]);
-export type ReposStatusDocument = z.infer<typeof ReposStatusDocument>;
+export const ReposStatusDocument = s.union([ReposStatusReport, ReposStatusErrorReport]);
+export type ReposStatusDocument = s.Infer<typeof ReposStatusDocument>;

@@ -1,4 +1,5 @@
 import { assert, describe, test } from 'vitest';
+import * as s from '@fuzdev/fuz_schema/schema.ts';
 import { readdirSync } from 'node:fs';
 
 import {
@@ -10,6 +11,10 @@ import {
 	ReposStatusReport
 } from '#lib/repos_status.ts';
 import { GOLDEN_DIR, load_golden } from './test_helpers.ts';
+
+/** A failed parse's issues, one a line, for an assertion message. */
+const format_failure = (result: s.SchemaResult<unknown>): string | undefined =>
+	result.ok ? undefined : result.issues.map(s.format_issue).join('\n');
 
 type GoldenKind = 'report' | 'error' | 'sessions' | 'not_mirrored';
 
@@ -46,7 +51,7 @@ describe('golden discovery', () => {
 	});
 
 	test('every error kind the mirror knows has its golden', () => {
-		const kinds = ReposStatusErrorBody.options.map((o) => o.shape.kind.value).sort();
+		const kinds = ReposStatusErrorBody.def.options.map((o) => o.def.kind.def).sort();
 		const named = goldens_of('error')
 			.map((f) => f.slice('error_report_'.length, -'.json'.length))
 			.sort();
@@ -56,27 +61,27 @@ describe('golden discovery', () => {
 
 describe('golden documents parse strictly', () => {
 	test.each(goldens_of('report'))('%s', (name) => {
-		const result = ReposStatusReport.safeParse(load_golden(name));
-		assert.ok(result.success, result.error?.message);
+		const result = s.parse(ReposStatusReport, load_golden(name));
+		assert.ok(result.ok, format_failure(result));
 	});
 
 	test.each(goldens_of('error'))('%s', (name) => {
-		const result = ReposStatusErrorReport.safeParse(load_golden(name));
-		assert.ok(result.success, result.error?.message);
+		const result = s.parse(ReposStatusErrorReport, load_golden(name));
+		assert.ok(result.ok, format_failure(result));
 		// named for its kind
-		assert.strictEqual(name, `error_report_${result.data.error.kind}.json`);
+		assert.strictEqual(name, `error_report_${result.value.error.kind}.json`);
 	});
 
 	test('sessions.json', () => {
-		const result = ReposSessions.array().safeParse(load_golden('sessions.json'));
-		assert.ok(result.success, result.error?.message);
+		const result = s.parse(s.array(ReposSessions), load_golden('sessions.json'));
+		assert.ok(result.ok, format_failure(result));
 	});
 
 	test('either document parses as a status document', () => {
 		for (const name of [...goldens_of('report'), ...goldens_of('error')]) {
-			const result = ReposStatusDocument.safeParse(load_golden(name));
-			assert.ok(result.success, `${name}: ${result.error?.message}`);
-			assert.strictEqual('error' in result.data, golden_kind(name) === 'error', name);
+			const result = s.parse(ReposStatusDocument, load_golden(name));
+			assert.ok(result.ok, `${name}: ${format_failure(result)}`);
+			assert.strictEqual('error' in result.value, golden_kind(name) === 'error', name);
 		}
 	});
 });
@@ -85,7 +90,7 @@ describe('golden documents parse strictly', () => {
 const report_with = (
 	mutate: (doc: ReposStatusReport, entry: ReposStatusReport['entries'][number]) => void
 ): unknown => {
-	const doc = ReposStatusReport.parse(load_golden('status_report.json'));
+	const doc = s.parse_or_throw(ReposStatusReport, load_golden('status_report.json'));
 	const entry = doc.entries[0];
 	assert.ok(entry);
 	mutate(doc, entry);
@@ -94,34 +99,47 @@ const report_with = (
 
 /** An error golden, parsed, then changed by `mutate`. */
 const error_with = (mutate: (doc: ReposStatusErrorReport) => void): unknown => {
-	const doc = ReposStatusErrorReport.parse(load_golden('error_report_io.json'));
+	const doc = s.parse_or_throw(ReposStatusErrorReport, load_golden('error_report_io.json'));
 	mutate(doc);
 	return doc;
 };
 
-const assert_refused = (result: { success: boolean }): void => {
-	assert.ok(!result.success, 'parsed a document the mirror should refuse');
+const assert_refused = (result: { ok: boolean }): void => {
+	assert.ok(!result.ok, 'parsed a document the mirror should refuse');
 };
 
 describe('the mirror refuses drift', () => {
 	test('an unknown field', () => {
-		assert_refused(ReposStatusReport.safeParse(report_with((doc) => Object.assign(doc, { x: 1 }))));
 		assert_refused(
-			ReposStatusReport.safeParse(report_with((_, entry) => Object.assign(entry, { x: 1 })))
+			s.parse(
+				ReposStatusReport,
+				report_with((doc) => Object.assign(doc, { x: 1 }))
+			)
 		);
 		assert_refused(
-			ReposStatusErrorReport.safeParse(error_with((doc) => Object.assign(doc.error, { x: 1 })))
+			s.parse(
+				ReposStatusReport,
+				report_with((_, entry) => Object.assign(entry, { x: 1 }))
+			)
+		);
+		assert_refused(
+			s.parse(
+				ReposStatusErrorReport,
+				error_with((doc) => Object.assign(doc.error, { x: 1 }))
+			)
 		);
 	});
 
 	test('an unknown kind', () => {
 		assert_refused(
-			ReposStatusReport.safeParse(
+			s.parse(
+				ReposStatusReport,
 				report_with((_, entry) => Object.assign(entry.presence, { kind: 'elsewhere' }))
 			)
 		);
 		assert_refused(
-			ReposStatusErrorReport.safeParse(
+			s.parse(
+				ReposStatusErrorReport,
 				error_with((doc) => Object.assign(doc.error, { kind: 'elsewhere' }))
 			)
 		);
@@ -130,7 +148,8 @@ describe('the mirror refuses drift', () => {
 	test('a variant the status document never carries', () => {
 		// a push's rejection is never a fetch's
 		assert_refused(
-			ReposStatusReport.safeParse(
+			s.parse(
+				ReposStatusReport,
 				report_with((_, entry) =>
 					Object.assign(entry, {
 						fetch_error: { kind: 'rejected', reason: 'non-fast-forward', message: null }
@@ -140,7 +159,8 @@ describe('the mirror refuses drift', () => {
 		);
 		// a refresh's hold is never a branch's
 		assert_refused(
-			ReposStatusReport.safeParse(
+			s.parse(
+				ReposStatusReport,
 				report_with((_, entry) => {
 					const branch = entry.branches[0];
 					assert.ok(branch);
@@ -151,7 +171,8 @@ describe('the mirror refuses drift', () => {
 		);
 		// an unreadable HEAD is `null`, never a kind of its own
 		assert_refused(
-			ReposStatusReport.safeParse(
+			s.parse(
+				ReposStatusReport,
 				report_with((_, entry) => {
 					const unprobed = entry.unprobed_worktrees[0];
 					assert.ok(unprobed);
@@ -161,7 +182,8 @@ describe('the mirror refuses drift', () => {
 		);
 		// `repos push`'s alone
 		assert_refused(
-			ReposStatusErrorReport.safeParse(
+			s.parse(
+				ReposStatusErrorReport,
 				error_with((doc) => Object.assign(doc.error, { kind: 'no_checkout' }))
 			)
 		);
@@ -170,47 +192,59 @@ describe('the mirror refuses drift', () => {
 	test('another version', () => {
 		for (const version of [REPOS_STATUS_FORMAT_VERSION - 1, REPOS_STATUS_FORMAT_VERSION + 1]) {
 			assert_refused(
-				ReposStatusReport.safeParse(report_with((doc) => Object.assign(doc, { version })))
+				s.parse(
+					ReposStatusReport,
+					report_with((doc) => Object.assign(doc, { version }))
+				)
 			);
 			assert_refused(
-				ReposStatusErrorReport.safeParse(error_with((doc) => Object.assign(doc, { version })))
+				s.parse(
+					ReposStatusErrorReport,
+					error_with((doc) => Object.assign(doc, { version }))
+				)
 			);
 		}
 	});
 
 	test('a missing field', () => {
 		assert_refused(
-			ReposStatusReport.safeParse(report_with((doc) => Reflect.deleteProperty(doc, 'sessions')))
+			s.parse(
+				ReposStatusReport,
+				report_with((doc) => Reflect.deleteProperty(doc, 'sessions'))
+			)
 		);
 		assert_refused(
-			ReposStatusReport.safeParse(
+			s.parse(
+				ReposStatusReport,
 				report_with((_, entry) => Reflect.deleteProperty(entry, 'stashes'))
 			)
 		);
 		// `null`, never omitted
 		assert_refused(
-			ReposStatusReport.safeParse(
+			s.parse(
+				ReposStatusReport,
 				report_with((_, entry) => Reflect.deleteProperty(entry, 'probe_error'))
 			)
 		);
 		assert_refused(
-			ReposStatusErrorReport.safeParse(
+			s.parse(
+				ReposStatusErrorReport,
 				error_with((doc) => Reflect.deleteProperty(doc.error, 'hint'))
 			)
 		);
-		const session = ReposSessions.array().parse(load_golden('sessions.json'))[0];
+		const session = s.parse_or_throw(s.array(ReposSessions), load_golden('sessions.json'))[0];
 		assert.ok(session?.kind === 'available');
 		const unscoped = session.unscoped[0];
 		assert.ok(unscoped);
 		assert.strictEqual(unscoped.worktree, null);
 		Reflect.deleteProperty(unscoped, 'worktree');
-		assert_refused(ReposSessions.safeParse(session));
+		assert_refused(s.parse(ReposSessions, session));
 	});
 
 	test('the document union refuses a report carrying an error', () => {
 		const doc = report_with((d) =>
 			Object.assign(d, { error: { kind: 'io', message: 'x', hint: null } })
 		);
-		assert_refused(ReposStatusDocument.safeParse(doc));
+		assert_refused(s.parse(ReposStatusDocument, doc));
 	});
 });

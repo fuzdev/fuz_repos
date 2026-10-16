@@ -10,17 +10,18 @@
  */
 
 import { existsSync } from 'node:fs';
-import { z } from 'zod';
+import * as s from '@fuzdev/fuz_schema/schema.ts';
+import { meta } from '@fuzdev/fuz_schema/meta.ts';
 
 import type { ReposEntryStatus } from './repos_status.ts';
 
 /** A project's gitops config. */
-export const GitopsConfig = z.strictObject({
-	repos: z
-		.array(z.string().min(1))
-		.meta({ description: 'repos.toml registry keys of owned repos, in the order tasks list them' })
+export const GitopsConfig = s.object({
+	repos: meta(s.array(s.pipe(s.string, s.min_length(1))), {
+		description: 'repos.toml registry keys of owned repos, in the order tasks list them'
+	})
 });
-export type GitopsConfig = z.infer<typeof GitopsConfig>;
+export type GitopsConfig = s.Infer<typeof GitopsConfig>;
 
 /** A config module's default export in function form. */
 export type CreateGitopsConfig = () => GitopsConfig | Promise<GitopsConfig>;
@@ -85,15 +86,15 @@ const error_with_stack = (err: unknown): string =>
  * @throws {Error} naming the config and what's wrong with it
  */
 export const parse_gitops_config = (raw: unknown, config_path: string): GitopsConfig => {
-	const parsed = GitopsConfig.safeParse(raw);
-	if (!parsed.success) {
+	const parsed = s.parse(GitopsConfig, raw);
+	if (!parsed.ok) {
 		const hint =
 			"\n  `repos` lists repos.toml registry keys; a repo's url, dir, branch, visibility, ci, and archived come from the registry";
 		throw Error(
-			`Invalid gitops config at ${config_path}:\n${z.prettifyError(parsed.error)}${hint}`
+			`Invalid gitops config at ${config_path}:\n  ${parsed.issues.map(s.format_issue).join('\n  ')}${hint}`
 		);
 	}
-	const config = parsed.data;
+	const config = parsed.value;
 	const problems: Array<string> = [];
 	const seen: Set<string> = new Set();
 	for (const key of config.repos) {

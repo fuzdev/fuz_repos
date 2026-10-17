@@ -210,9 +210,11 @@ struct SendPack<'a> {
 enum Sent {
     /// The remote's ref moved to the commit.
     Pushed,
-    /// The remote's ref already held it.
+    /// The remote's ref already held it, or the remote's own update refused
+    /// and said it was there (`lock_race`).
     UpToDate,
-    /// Refused or not sent: held, or failed at the remote (`rejected`).
+    /// Refused or not sent: held, or failed at the remote (`rejected`,
+    /// `lock_race`).
     Stopped(Stop),
 }
 
@@ -748,9 +750,10 @@ impl Step<'_> {
                 })
             }
             // the remote holds the commit: the lease would have refused
-            // that, so another hand pushed it in the instant between — and
-            // the fetched tip was an ancestor of it, so the ref moves as if
-            // this push had put it there
+            // that, so another hand pushed it in the instant between, or the
+            // remote's own update refused and said the ref was at it
+            // (`lock_race`) — and the fetched tip was an ancestor of it, so
+            // the ref moves as if this push had put it there
             Sent::UpToDate => {
                 self.record_push(dir, p.upstream, &fetched, p.oid);
                 Ok(PushDone::AlreadyThere)
@@ -843,7 +846,10 @@ impl Step<'_> {
     /// Sends `s.oid` to `s.target` on the registry's repo, over SSH, under a
     /// lease that the remote's ref is `s.expect` (`None`: that it doesn't
     /// exist, an empty value to git), and reads what git and the remote
-    /// made of it.
+    /// made of it: a lease that passed, then a remote update whose
+    /// compare-and-swap refused (`lock_race`), reads up to date when the
+    /// remote's words put the ref at the commit, and held (`changed`)
+    /// otherwise.
     fn send_pack(&self, dir: &Path, s: &SendPack<'_>) -> Result<Sent, String> {
         let lease = format!(
             "--force-with-lease={}:{}",
@@ -884,10 +890,18 @@ impl Step<'_> {
                 ok: true,
                 message: Some(message),
             }) => Err(format!("git pushed {}: {message}", s.target)),
-            Some(PushedRef { ok: false, message }) => Ok(Sent::Stopped(rejected(
-                message.unwrap_or_default(),
-                &out.stderr,
-            ))),
+            Some(PushedRef { ok: false, message }) => {
+                let why = message.unwrap_or_default();
+                let raced = s
+                    .expect
+                    .and_then(|expect| lock_race(why, &out.stderr, s.target, expect));
+                Ok(match raced {
+                    // the remote's words put the ref at the commit
+                    Some(LockRace::At(at)) if at == s.oid => Sent::UpToDate,
+                    Some(_) => Sent::Stopped(Stop::Held(BranchSyncHold::Changed)),
+                    None => Sent::Stopped(rejected(why, &out.stderr)),
+                })
+            }
             None if out.status.success() => {
                 Err(format!("git send-pack reported nothing for {}", s.target))
             }
@@ -1121,7 +1135,9 @@ pub(super) fn pushed_ref<'a>(stdout: &'a str, dst: &str) -> Option<PushedRef<'a>
 /// git's other refusals fail with their words; anything else is the
 /// remote's refusal (a ruleset, a hook), failed with its reason and the
 /// remote's first error line. A remote whose reason reads exactly as one
-/// of git's is taken for git's: nothing was pushed either way.
+/// of git's is taken for git's: nothing was pushed either way. A refusal
+/// of the remote's own compare-and-swap, after the lease passed, is read
+/// first (`lock_race`).
 pub(super) fn rejected(why: &str, stderr: &str) -> Stop {
     match why {
         "stale info" | "fetch first" | "non-fast forward" => Stop::Held(BranchSyncHold::Changed),
@@ -1142,6 +1158,88 @@ pub(super) fn rejected(why: &str, stderr: &str) -> Stop {
             message: remote_error(stderr),
         }),
     }
+}
+
+/// Git receive-pack's reason for a ref update that failed at the remote;
+/// what failed is on the remote's `error:` line.
+const FAILED_TO_UPDATE_REF: &str = "failed to update ref";
+
+/// Newer git receive-pack's reasons for a ref update whose compare-and-swap
+/// refused, naming no commit: the ref was elsewhere, or gone. A push here is
+/// under a lease on a commit, so either means the ref left it. The words are
+/// git's source's, unverified against a git 2.50 or newer on this machine;
+/// CI's git exercises them (`push_races`, `push_rebase_races`).
+const OLD_VALUE_REFUSED: [&str; 2] = ["incorrect old value provided", "reference does not exist"];
+
+/// What a remote's own refusal of a ref update says of the ref, for a push
+/// whose lease had passed (`lock_race`).
+#[derive(Debug, PartialEq, Eq)]
+pub(super) enum LockRace<'a> {
+    /// At this commit.
+    At(&'a str),
+    /// Not at the commit the lease expected, its words naming none: gone,
+    /// or a reason that gives no commit.
+    Moved,
+}
+
+/// What the remote said of `target` when its own update of it refused, for
+/// a push whose lease, on `expect`, had passed: its compare-and-swap found
+/// the ref other than the commit it advertised. Git's words are `cannot
+/// lock ref '<target>': is at <X> but expected <Y>` (`Y` the advertised
+/// commit, so `expect`; `At(X)`) or `…: unable to resolve reference
+/// '<target>'` (gone; `Moved`). A host may give them as the reason itself
+/// (GitHub does); git's receive-pack gives `failed to update ref` and puts
+/// them on its last `remote: error: cannot lock ref '<target>'` line —
+/// the last, since git prints its own after anything a `pre-receive` hook
+/// did, and runs no later hook for a ref that failed. Newer git's
+/// batched updates give a reason naming no commit (`OLD_VALUE_REFUSED`;
+/// `Moved`).
+///
+/// `None` for anything else — another ref, another expected commit, an
+/// object id not whole as git prints it, any other words, that last line
+/// included — and the refusal is `rejected`'s: the ref's state is read
+/// only from the remote's own words for the ref pushed, never guessed.
+pub(super) fn lock_race<'a>(
+    why: &'a str,
+    stderr: &'a str,
+    target: &str,
+    expect: &str,
+) -> Option<LockRace<'a>> {
+    if OLD_VALUE_REFUSED.contains(&why) {
+        return Some(LockRace::Moved);
+    }
+    let read = |words: &'a str| {
+        let rest = words
+            .strip_prefix("cannot lock ref '")?
+            .strip_prefix(target)?
+            .strip_prefix("': ")?;
+        if let Some(rest) = rest.strip_prefix("is at ") {
+            let (at, expected) = rest.split_once(" but expected ")?;
+            // lowercase, as git prints it
+            let whole = at.len() == expect.len()
+                && porcelain::is_object_id(at)
+                && !at.bytes().any(|b| b.is_ascii_uppercase());
+            return (expected == expect && whole).then_some(LockRace::At(at));
+        }
+        let gone = rest
+            .strip_prefix("unable to resolve reference '")?
+            .strip_prefix(target)?;
+        (gone == "'").then_some(LockRace::Moved)
+    };
+    if let Some(found) = read(why) {
+        return Some(found);
+    }
+    if why != FAILED_TO_UPDATE_REF {
+        return None;
+    }
+    let lock = format!("cannot lock ref '{target}': ");
+    stderr
+        .lines()
+        .filter_map(|l| l.strip_prefix("remote:"))
+        .filter_map(|l| l.trim().strip_prefix("error:"))
+        .map(str::trim)
+        .rfind(|l| l.starts_with(&lock))
+        .and_then(read)
 }
 
 /// The remote's first `error:` line, as git relays it (`remote: error: …`,

@@ -323,13 +323,19 @@ check keeps the push a fast-forward. Any other push URL holds its pushes as a
 `refs/heads/`) is left to a person. A remote branch moved or deleted since the
 fetch fails the lease (`held`, rerun — a deleted one then reads gone, so no
 push recreates it but the user's `repos push --new-branch`, and only while it
-has commits on no remote); the remote's own refusal or an unreachable host is
-`push_failed`, exit `1`. After a push (or finding the commit already there,
-another hand's push since the fetch) the remote-tracking ref moves to the
-commit by compare-and-swap on the fetched tip, so `status` reads the branch in
-sync without a refetch. That write is best effort: a ref a fetch moved in the
-meantime stands, and one git can't write (a stale lock) leaves the outcome as
-it is and the branch reading ahead until a fetch can write it.
+has commits on no remote); a push whose lease passed but whose update the
+remote's own compare-and-swap then refuses (`cannot lock ref '<ref>': is at
+<X> but expected <fetched>` or `…: unable to resolve reference '<ref>'`, or
+newer git's `incorrect old value provided` / `reference does not exist`) is
+held the same, unless the remote's words put the ref at the very commit
+pushed: that reads as already there. The remote's own refusal or an
+unreachable host is `push_failed`, exit `1`. After a push (or finding the
+commit already there, another hand's push since the fetch) the remote-tracking
+ref moves to the commit by compare-and-swap on the fetched tip, so `status`
+reads the branch in sync without a refetch. That write is best effort: a ref a
+fetch moved in the meantime stands, and one git can't write (a stale lock)
+leaves the outcome as it is and the branch reading ahead until a fetch can
+write it.
 
 **Rebases.** A registry branch diverged from origin's — local-only commits
 here, new commits there, as when two machines commit to the same `main` — is

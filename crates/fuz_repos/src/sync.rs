@@ -204,17 +204,20 @@
 //!   but the fetched tip — fails the lease and is held (`changed`) for a
 //!   rerun, which reclassifies it: a deleted branch reads `gone`, so no
 //!   push recreates one (the user's `repos push --new-branch` alone does,
-//!   and only while it has commits on no remote). The push sends nothing
-//!   but the one ref — no tags, no push options, no push certificate — with
-//!   git's own remote command, over SSH only (`GIT_ALLOW_PROTOCOL=ssh`),
-//!   batch-mode as the fetch. The remote's own refusal (a ruleset, a hook)
-//!   or a host unreachable fails (`push_failed`, classified). Once pushed —
-//!   or found there already, another hand's push of the very commit since
-//!   the fetch — the remote-tracking ref moves to the commit by
-//!   compare-and-swap on the fetched tip (`record_push`), so `status` reads
-//!   the branch in sync without a refetch; a fetch that moved it meanwhile
-//!   wins. A failed or refused fetch holds every push, so that ref is one
-//!   the fetch confined.
+//!   and only while it has commits on no remote). A push whose lease passed
+//!   but whose update the remote's own compare-and-swap then refused
+//!   (`cannot lock ref`, `lock_race`) is held the same, unless the remote's
+//!   words put the ref at the very commit, which reads as found there. The
+//!   push sends nothing but the one ref — no tags, no push options, no push
+//!   certificate — with git's own remote command, over SSH only
+//!   (`GIT_ALLOW_PROTOCOL=ssh`), batch-mode as the fetch. The remote's own
+//!   refusal (a ruleset, a hook) or a host unreachable fails
+//!   (`push_failed`, classified). Once pushed — or found there already,
+//!   another hand's push of the very commit since the fetch — the
+//!   remote-tracking ref moves to the commit by compare-and-swap on the
+//!   fetched tip (`record_push`), so `status` reads the branch in sync
+//!   without a refetch; a fetch that moved it meanwhile wins. A failed or
+//!   refused fetch holds every push, so that ref is one the fetch confined.
 //!
 //! - **A new remote branch** is `repos push --new-branch`'s alone (sync
 //!   never creates one): the same send-pack to the registry's URL, of the

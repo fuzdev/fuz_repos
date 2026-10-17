@@ -3,8 +3,9 @@
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
-use super::FixtureWorkspace;
+use super::{FixtureWorkspace, write_executable};
 use fuz_repos::push::PushRun;
 use fuz_repos::report::{BranchSyncHold, PushOutcome};
 
@@ -55,6 +56,48 @@ pub fn pushes_served(ws: &FixtureWorkspace) -> Vec<String> {
             None => l,
         })
         .collect()
+}
+
+/// A `pre-receive` hook on `name`'s bare remote that moves the pushed ref
+/// to `to` — a shell word, `"$new"` the pushed commit — from the commit the
+/// remote advertised: after the lease passed, so the remote's own update
+/// then fails its compare-and-swap (`cannot lock ref`).
+pub fn move_ref_before_update(ws: &FixtureWorkspace, name: &str, to: &str) {
+    update_ref_before_update(ws, name, &format!("\"$ref\" {to} \"$old\""));
+}
+
+/// A `pre-receive` hook on `name`'s bare remote that deletes the pushed ref
+/// after the lease passed, so the remote's own update finds it gone.
+pub fn delete_ref_before_update(ws: &FixtureWorkspace, name: &str) {
+    update_ref_before_update(ws, name, "-d \"$ref\" \"$old\"");
+}
+
+/// A `pre-receive` hook running `git update-ref <args>` on the pushed ref.
+/// Git forbids a ref update from inside the quarantine the hook runs in,
+/// which unsetting its path lifts; the pushed objects stay readable.
+fn update_ref_before_update(ws: &FixtureWorkspace, name: &str, args: &str) {
+    write_executable(
+        &ws.bare(name),
+        "hooks/pre-receive",
+        &format!(
+            "#!/bin/sh\nread old new ref\nunset GIT_QUARANTINE_PATH\n\
+             git update-ref {args}\n"
+        ),
+    );
+}
+
+/// Whether the git on `PATH` may refuse the update a `pre-receive` hook
+/// raced (`move_ref_before_update`) in words naming no commit: 2.50 batches
+/// receive-pack's ref updates, whose refusal reads (unverified here)
+/// `incorrect old value provided`, so a ref moved to the very commit pushed
+/// holds (`changed`) for a rerun where older git's `cannot lock ref` words
+/// read it in sync at once. Older git always reads it in sync.
+pub fn refusal_may_name_no_commit() -> bool {
+    let out = Command::new("git").arg("--version").output().unwrap();
+    let out = String::from_utf8(out.stdout).unwrap();
+    let version = out.trim().strip_prefix("git version ").unwrap();
+    let mut parts = version.split('.').map(|p| p.parse::<u32>().unwrap());
+    (parts.next().unwrap(), parts.next().unwrap()) >= (2, 50)
 }
 
 /// `app`, owned, its `main` ahead of origin by one commit; returns the

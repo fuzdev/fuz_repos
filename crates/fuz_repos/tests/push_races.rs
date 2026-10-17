@@ -15,9 +15,14 @@ mod support;
 use std::ffi::OsString;
 use std::path::Path;
 
-use fuz_repos::report::{BranchSyncHold, NoUpstreamWhy, PushOutcome};
+use fuz_repos::report::{BranchSyncHold, NoUpstreamWhy, PushOutcome, RebasePush};
 use fuz_repos::state::Relation;
-use support::push::{ahead, feat_ahead, only, pushed, pushes_served, remote_refs, topic, with};
+use support::cli::{repos, stderr, stdout};
+use support::push::{
+    ahead, delete_ref_before_update, feat_ahead, held, move_ref_before_update, only, pushed,
+    pushes_served, refusal_may_name_no_commit, remote_refs, topic, with,
+};
+use support::rebase::push_rebased;
 use support::{
     FixtureWorkspace, TRACKING, branch, find_entry, git_env, reader_then, write, write_executable,
 };
@@ -220,6 +225,112 @@ fn a_commit_another_hand_pushed_meanwhile_reads_in_sync() {
     ws.assert_track(&app, "main", "");
     let e = find_entry(&ws.status(), "app").clone();
     assert_eq!(branch(&e, "main").relation, Relation::InSync);
+}
+
+/// The remote's ref moved to the very commit after the lease passed: the
+/// remote's own update refuses (`cannot lock ref`), its words putting the
+/// ref at the commit — in sync, as another hand's push of it before the
+/// lease. A git whose refusal names no commit holds it for a rerun, which
+/// reads it in sync (`refusal_may_name_no_commit`).
+#[test]
+fn a_commit_moved_onto_the_remote_before_its_own_update_reads_in_sync() {
+    let mut ws = FixtureWorkspace::new();
+    let (app, tip) = ahead(&mut ws);
+    let fetched = ws.git(&app, &["rev-parse", TRACKING]);
+    assert_ne!(fetched, tip);
+    move_ref_before_update(&ws, "app", "\"$new\"");
+
+    let mut run = ws.push(&["app"]);
+    if refusal_may_name_no_commit() && only(&run).1 == &held(BranchSyncHold::Changed) {
+        run = ws.push(&["app"]);
+    }
+
+    assert_eq!(only(&run), (Some("main"), &PushOutcome::InSync));
+    assert_eq!(ws.git(&ws.bare("app"), &["rev-parse", "main"]), tip);
+    assert_eq!(pushes_served(&ws).len(), 1);
+    // recorded as a push of its own would be: in sync from local refs
+    assert_eq!(ws.git(&app, &["rev-parse", TRACKING]), tip);
+    ws.assert_track(&app, "main", "");
+
+    // through the binary: in sync, exit 0
+    let mut ws = FixtureWorkspace::new();
+    let (app, tip) = ahead(&mut ws);
+    move_ref_before_update(&ws, "app", "\"$new\"");
+    let mut out = repos(&ws, &app, &["push"]);
+    if refusal_may_name_no_commit()
+        && stdout(&out).starts_with("held          app +1 (changed since read, rerun)\n")
+    {
+        out = repos(&ws, &app, &["push"]);
+    }
+    assert_eq!(out.status.code(), Some(0), "stderr: {}", stderr(&out));
+    assert!(
+        stdout(&out).starts_with("in sync       app\n"),
+        "{}",
+        stdout(&out)
+    );
+    assert_eq!(ws.git(&ws.bare("app"), &["rev-parse", "main"]), tip);
+    assert_eq!(ws.git(&app, &["rev-parse", TRACKING]), tip);
+}
+
+/// The remote's ref moved anywhere but the commit after the lease passed:
+/// held as a lease's refusal is, and the rerun reclassifies what it finds.
+#[test]
+fn a_remote_moved_elsewhere_before_its_own_update_holds_the_push() {
+    let mut ws = FixtureWorkspace::new();
+    let (app, tip) = ahead(&mut ws);
+    let fetched = ws.git(&app, &["rev-parse", TRACKING]);
+    // a commit the remote holds, its branch back at the fetched tip
+    let other = ws.upstream_commit("app", "main");
+    let bare = ws.bare("app");
+    ws.git(&bare, &["update-ref", "refs/heads/main", &fetched]);
+    move_ref_before_update(&ws, "app", &other);
+
+    let run = ws.push(&["app"]);
+
+    assert_eq!(only(&run), (Some("main"), &held(BranchSyncHold::Changed)));
+    // left where the other hand put it: never forced over
+    assert_eq!(ws.git(&bare, &["rev-parse", "main"]), other);
+    assert_eq!(pushes_served(&ws).len(), 1);
+    assert_eq!(ws.git(&app, &["rev-parse", TRACKING]), fetched);
+    assert_eq!(ws.git(&app, &["rev-parse", "main"]), tip);
+
+    // the rerun fetches it, finds the branch diverged, and rebases onto it
+    std::fs::remove_file(bare.join("hooks/pre-receive")).unwrap();
+    let rerun = ws.push(&["app"]);
+    let (from, to, onto, push) = push_rebased(&rerun);
+    assert_eq!((from, onto), (tip.as_str(), other.as_str()));
+    assert_eq!(push, &RebasePush::Pushed);
+    assert_eq!(ws.git(&bare, &["rev-parse", "main"]), to);
+    assert_eq!(ws.git(&app, &["rev-parse", "main~1"]), other);
+}
+
+/// The remote's ref deleted after the lease passed: the remote's own update
+/// finds it gone (`unable to resolve reference`), held as a lease's refusal
+/// is, and the rerun reads it gone — never recreated.
+#[test]
+fn a_remote_branch_deleted_before_its_own_update_holds_the_push() {
+    let mut ws = FixtureWorkspace::new();
+    let (app, tip) = feat_ahead(&mut ws);
+    delete_ref_before_update(&ws, "app");
+
+    let run = ws.push(&["app"]);
+
+    assert_eq!(only(&run), (Some("feat"), &held(BranchSyncHold::Changed)));
+    assert!(!remote_refs(&ws, "app").contains_key("refs/heads/feat"));
+    assert_eq!(pushes_served(&ws).len(), 1);
+    assert_eq!(ws.git(&app, &["rev-parse", "feat"]), tip);
+    let rerun = ws.push(&["app"]);
+    assert_eq!(
+        only(&rerun),
+        (
+            Some("feat"),
+            &PushOutcome::NoUpstream {
+                why: NoUpstreamWhy::Creatable
+            }
+        )
+    );
+    assert!(!remote_refs(&ws, "app").contains_key("refs/heads/feat"));
+    assert_eq!(pushes_served(&ws).len(), 1);
 }
 
 #[test]

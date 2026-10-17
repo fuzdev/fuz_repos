@@ -16,7 +16,10 @@ mod support;
 use fuz_repos::report::{BranchSyncHold, PushOutcome, RebasePush};
 use fuz_repos::state::Verdict;
 use support::busy::live_in;
-use support::push::{held, only, pushes_served, remote_refs, with};
+use support::push::{
+    held, move_ref_before_update, only, pushes_served, refusal_may_name_no_commit, remote_refs,
+    with,
+};
 use support::rebase::{
     assert_replayed, diverged, loose_objects, push_rebased, rebase, refs_rebased, untouched,
 };
@@ -252,4 +255,39 @@ fn a_replayed_tip_another_hand_pushed_meanwhile_reads_in_sync() {
     let rerun = ws.push(&["app"]);
     assert_eq!(only(&rerun), (Some("main"), &PushOutcome::InSync));
     assert_eq!(pushes_served(&ws).len(), 1);
+}
+
+#[test]
+fn a_replayed_tip_moved_onto_the_remote_before_its_own_update_reads_in_sync() {
+    let mut ws = FixtureWorkspace::new();
+    let d = diverged(&mut ws);
+    let app = &d.app;
+    let before = ws.refs(app);
+    // the remote's ref moves to the replayed tip after the lease passed, so
+    // its own update refuses (`cannot lock ref`)
+    move_ref_before_update(&ws, "app", "\"$new\"");
+
+    let run = ws.push(&["app"]);
+
+    let (from, to, onto, push) = push_rebased(&run);
+    assert_eq!((from, onto), (d.tip(), d.upstream.as_str()));
+    let changed = RebasePush::Held {
+        by: BranchSyncHold::Changed,
+    };
+    if refusal_may_name_no_commit() && push == &changed {
+        // words naming no commit: the rerun reads the replayed tip there
+        let rerun = ws.push(&["app"]);
+        assert_eq!(only(&rerun), (Some("main"), &PushOutcome::InSync));
+    } else {
+        assert_eq!(push, &RebasePush::AlreadyThere);
+        assert!(run.pushes[0].outcome.in_sync());
+    }
+    assert_replayed(&ws, &d, to);
+    // the remote, the branch, and the remote-tracking ref the push recorded
+    // all hold the replayed tip
+    assert_eq!(ws.git(&ws.bare("app"), &["rev-parse", "main"]), to);
+    assert_eq!(ws.refs(app), refs_rebased(&before, to));
+    assert_eq!(pushes_served(&ws).len(), 1);
+    ws.assert_clean(app);
+    ws.assert_track(app, "main", "");
 }

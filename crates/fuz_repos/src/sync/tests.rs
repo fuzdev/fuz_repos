@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use super::step::{LazyFetch, PushedRef, first_message, pushed_ref, rejected};
+use super::step::{LazyFetch, LockRace, PushedRef, first_message, lock_race, pushed_ref, rejected};
 use super::*;
 use crate::classify::lazy_transport;
 use crate::porcelain::{self, ConfigFacts};
@@ -135,6 +135,144 @@ fn a_rejected_push_is_held_or_failed_by_why() {
         rejected("", ""),
         Stop::PushFailed(RemoteFailure::Failed { message }) if message == "rejected: no reason"
     ));
+}
+
+/// The remote's own refusal of a ref update after the lease passed, read
+/// from its words for the ref: GitHub's, the reason itself; git's, `failed
+/// to update ref` and its last `remote: error:` line for the ref; newer
+/// git's, a reason naming no commit. Anything else is `rejected`'s.
+#[test]
+fn a_remotes_own_refused_update_is_read_from_its_words() {
+    let dst = "refs/heads/main";
+    let fetched = "554301e6f5d3c1b2a0f9e8d7c6b5a4f3e2d1c0b9";
+    let at = "674bdf2a1b2c3d4e5f60718293a4b5c6d7e8f901";
+    let words =
+        |r: &str, x: &str, y: &str| format!("cannot lock ref '{r}': is at {x} but expected {y}");
+    let github = format!("error {dst} {}\n", words(dst, at, fetched));
+    // GitHub's form: the words are the reason, nothing on stderr
+    let why = pushed_ref(&github, dst).and_then(|p| p.message).unwrap();
+    assert_eq!(lock_race(why, "", dst, fetched), Some(LockRace::At(at)));
+    // git's form, its line padded as the sideband relays it, after the
+    // hook's own
+    let stderr = format!(
+        "remote: error: something else   \nremote: error: {}        \n\
+         To git@github.com:me/app\n ! [remote rejected] main -> main (failed to update ref)\n",
+        words(dst, at, fetched)
+    );
+    assert_eq!(
+        lock_race("failed to update ref", &stderr, dst, fetched),
+        Some(LockRace::At(at))
+    );
+    // SHA-256 ids as whole
+    let (fetched_256, at_256) = (fetched.repeat(2), at.repeat(2));
+    let (fetched_256, at_256) = (&fetched_256[..64], &at_256[..64]);
+    assert_eq!(
+        lock_race(&words(dst, at_256, fetched_256), "", dst, fetched_256),
+        Some(LockRace::At(at_256))
+    );
+
+    // never guessed: another ref, a prefix of it, or one under it
+    for r in ["refs/heads/feat", "refs/heads/mai", "refs/heads/main/x"] {
+        assert_eq!(
+            lock_race(&words(r, at, fetched), "", dst, fetched),
+            None,
+            "{r}"
+        );
+    }
+    // another expected commit than the fetched tip
+    assert_eq!(lock_race(&words(dst, at, at), "", dst, fetched), None);
+    // an id abbreviated, uppercase, null, of the other hash, or not hex
+    let upper = at.to_uppercase();
+    let null = "0".repeat(40);
+    for x in [
+        &at[..7],
+        upper.as_str(),
+        null.as_str(),
+        at_256,
+        &format!("{}g", &at[..39]),
+    ] {
+        assert_eq!(
+            lock_race(&words(dst, x, fetched), "", dst, fetched),
+            None,
+            "{x}"
+        );
+    }
+    // anything after the words, or around them
+    for why in [
+        format!("{} (retry)", words(dst, at, fetched)),
+        format!("error: {}", words(dst, at, fetched)),
+    ] {
+        assert_eq!(lock_race(&why, "", dst, fetched), None, "{why}");
+    }
+    // git's words on stderr count only under its own reason, and only on
+    // the remote's `error:` lines
+    let relayed = format!("remote: error: {}\n", words(dst, at, fetched));
+    assert_eq!(
+        lock_race("pre-receive hook declined", &relayed, dst, fetched),
+        None
+    );
+    assert_eq!(lock_race("", &relayed, dst, fetched), None);
+    let unprefixed = format!("remote: {}\n", words(dst, at, fetched));
+    assert_eq!(
+        lock_race("failed to update ref", &unprefixed, dst, fetched),
+        None
+    );
+    let local = format!("error: {}\n", words(dst, at, fetched));
+    assert_eq!(
+        lock_race("failed to update ref", &local, dst, fetched),
+        None
+    );
+    // git's own line is the last for the ref: a hook's before it never
+    // reads in its place
+    let crafted = format!("remote: error: {}\n", words(dst, at, fetched));
+    let lock_file = format!(
+        "{crafted}remote: error: cannot lock ref '{dst}': Unable to create \
+         '/srv/app.git/./{dst}.lock': File exists.        \nremote: \n\
+         remote: Another git process seems to be running in this repository\n"
+    );
+    assert_eq!(
+        lock_race("failed to update ref", &lock_file, dst, fetched),
+        None
+    );
+    let elsewhere = "0123456789abcdef0123456789abcdef01234567";
+    let genuine = format!(
+        "{crafted}remote: error: {}\n",
+        words(dst, elsewhere, fetched)
+    );
+    assert_eq!(
+        lock_race("failed to update ref", &genuine, dst, fetched),
+        Some(LockRace::At(elsewhere))
+    );
+
+    // gone: git's words for a ref it can't find, as either form
+    let gone = |r: &str| format!("cannot lock ref '{r}': unable to resolve reference '{r}'");
+    assert_eq!(
+        lock_race(&gone(dst), "", dst, fetched),
+        Some(LockRace::Moved)
+    );
+    let relayed_gone = format!("remote: error: {}        \n", gone(dst));
+    assert_eq!(
+        lock_race("failed to update ref", &relayed_gone, dst, fetched),
+        Some(LockRace::Moved)
+    );
+    // another ref's, or another ref named in the words
+    assert_eq!(lock_race(&gone("refs/heads/feat"), "", dst, fetched), None);
+    let mixed = format!("cannot lock ref '{dst}': unable to resolve reference 'refs/heads/feat'");
+    assert_eq!(lock_race(&mixed, "", dst, fetched), None);
+    assert_eq!(
+        lock_race(&format!("{} (retry)", gone(dst)), "", dst, fetched),
+        None
+    );
+
+    // newer git's reasons naming no commit
+    for why in ["incorrect old value provided", "reference does not exist"] {
+        assert_eq!(
+            lock_race(why, "", dst, fetched),
+            Some(LockRace::Moved),
+            "{why}"
+        );
+    }
+    assert_eq!(lock_race("incorrect old value", "", dst, fetched), None);
 }
 
 /// `main` of `/ws/app`, checked out and a commit ahead, as classify

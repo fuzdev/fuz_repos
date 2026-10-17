@@ -7,7 +7,7 @@ mod support;
 use std::path::{Path, PathBuf};
 
 use fuz_repos::sessions::{LiveSessions, SessionSource, Unavailable, read_live_sessions};
-use support::busy::{app, by_pid, child_session, claude_dir, read, read_as, source};
+use support::busy::{app, by_pid, calling, child_session, claude_dir, read, read_as, source};
 use support::cli::REPOS;
 use support::{
     ClaudeDir, FixtureWorkspace, LiveChild, dead_pid, own_pid_domain, path, proc_start,
@@ -275,8 +275,10 @@ fn roster_workers_join_the_sessions_by_pid_and_cwd() {
         child_session(&worker, &app, SessionSource::RosterWorker),
     ];
     let callers_session = child_session(&callers_worker, &app, SessionSource::RosterWorker);
-    assert_eq!(read_as(&claude, &caller, true), by_pid(everyone.clone()));
-    // a caller the process tree doesn't back excludes nothing
+    let mut marked = everyone.clone();
+    marked.push(calling(callers_session.clone(), None));
+    assert_eq!(read_as(&claude, &caller, true), by_pid(marked));
+    // a caller the process tree doesn't back marks nothing
     let mut all = everyone.clone();
     all.push(callers_session.clone());
     assert_eq!(read_as(&claude, &caller, false), by_pid(all.clone()));
@@ -333,7 +335,7 @@ fn roster_workers_join_the_sessions_by_pid_and_cwd() {
 }
 
 #[test]
-fn the_calling_session_is_excluded_when_it_is_an_ancestor() {
+fn the_calling_session_is_marked_when_it_is_an_ancestor() {
     let ws = FixtureWorkspace::new();
     let claude = claude_dir(&ws, "claude");
     let caller = LiveChild::spawn();
@@ -341,19 +343,46 @@ fn the_calling_session_is_excluded_when_it_is_an_ancestor() {
     claude.session(caller.pid(), &caller.proc_start(), &ws.dir("app"));
     claude.session(other.pid(), &other.proc_start(), &ws.root());
     let theirs = child_session(&other, &ws.root(), SessionSource::SessionFile);
+    let callers = child_session(&caller, &ws.dir("app"), SessionSource::SessionFile);
     assert_eq!(
         read_as(&claude, &caller, true),
-        LiveSessions::Known(vec![theirs.clone()])
+        by_pid(vec![calling(callers.clone(), None), theirs.clone()])
     );
     // `CLAUDE_PID` naming a live session that isn't this process's
     // ancestor: anything could have set it, so it's not the caller
     assert_eq!(
         read_as(&claude, &caller, false),
-        by_pid(vec![
-            child_session(&caller, &ws.dir("app"), SessionSource::SessionFile),
-            theirs,
-        ])
+        by_pid(vec![callers, theirs])
     );
+}
+
+#[test]
+fn the_callers_worker_keeps_its_mark_under_its_session_file() {
+    let ws = FixtureWorkspace::new();
+    let a = claude_dir(&ws, "a");
+    let b = claude_dir(&ws, "b");
+    let app = ws.dir("app");
+    let caller = LiveChild::spawn();
+    let worker = LiveChild::spawn();
+    // the worker whose session process is the caller, recorded by a session
+    // file of its own too, in either dir read first
+    a.roster(&serde_json::json!({"workers": {
+        "w": roster_worker(worker.pid(), &worker.proc_start(), &app,
+            (caller.pid(), &caller.proc_start())),
+    }}));
+    b.session(worker.pid(), &worker.proc_start(), &app);
+    let marked = LiveSessions::Known(vec![calling(
+        child_session(&worker, &app, SessionSource::SessionFile),
+        None,
+    )]);
+    for dirs in [[&a, &b], [&b, &a]] {
+        let mut source = source(&dirs);
+        source.claude_pid = Some(caller.pid());
+        source
+            .ancestors
+            .insert(caller.pid(), caller.proc_start().parse().unwrap());
+        assert_eq!(read_live_sessions(&source), marked);
+    }
 }
 
 #[test]

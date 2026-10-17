@@ -239,8 +239,8 @@ The details live in the rustdoc of `remote.rs`, `probe.rs`, and `url.rs`.
 **What it reads.** Busy detection reads the live Claude Code sessions under
 `$CLAUDE_CONFIG_DIR` and `~/.claude` — `sessions/<pid>.json` and the daemon
 roster's workers, each verified against `/proc/<pid>/stat`'s start time —
-excluding the caller (`CLAUDE_PID`, honored only when it's an ancestor of the
-process).
+and recognizes the caller (`CLAUDE_PID`, honored only when it's an ancestor of
+the process).
 
 **Where a session works.** A session works at its recorded cwd (Claude Code's
 `originalCwd`, which entering or exiting a worktree rewrites), a roster
@@ -259,6 +259,18 @@ It marks busy:
   <start>)`, matched against the session's pid and start time
 
 A busy checkout holds every action on its branches, pushes included.
+
+**The caller.** The caller is excluded at its own places and at the checkout
+`repos` runs in. Its subagents run in its process, under its pid, so the rest
+of its marks — its repo's `.claude/worktrees/`, and the worktrees whose lock
+names it — are its subagents' and still hold: a subagent running `repos` from
+its own worktree acts there, and its siblings' stay held. To act on such a
+worktree's branch, run `repos` from inside it, or, once its work is merged,
+remove the worktree (Claude Code locks it: `git worktree unlock` it first);
+the hold also ends when the session does. A `repos` detached from the session's process tree (`setsid`,
+`nohup` with a double fork) isn't recognized as the caller, so its own
+checkout holds; run it in the foreground or through the harness's background
+shell.
 
 **What it can't see.** Claude Code roots agent worktrees at its tracked cwd,
 which the Bash tool's `cd` moves without moving the process or the session
@@ -439,14 +451,14 @@ holding the cwd; a target is a registry key or dir name (the entry's own
 checkout) or a path (the checkout holding it, a linked worktree's own).
 
 **Pipeline.** For those entries alone it runs what sync runs before acting —
-the same fetch, a re-probe, the live sessions read (the caller's own
-excluded), classification — then acts on each checked-out branch's verdict
-alone, when it's a push or a rebase: a branch ahead through sync's own push
-(the lease, the direct URL, the compare-and-swap, every re-check right
-before), a diverged one through sync's own rebase and then that push. It
-never fast-forwards, moves a shallow branch, clones, or touches a branch
-other than the one checked out at a target: a branch behind is reported for
-`repos sync` to fast-forward.
+the same fetch, a re-probe, the live sessions read (the caller excluded as
+[above](#busy-detection)), classification — then acts on each checked-out
+branch's verdict alone, when it's a push or a rebase: a branch ahead through
+sync's own push (the lease, the direct URL, the compare-and-swap, every
+re-check right before), a diverged one through sync's own rebase and then that
+push. It never fast-forwards, moves a shallow branch, clones, or touches a
+branch other than the one checked out at a target: a branch behind is reported
+for `repos sync` to fast-forward.
 
 **A diverged branch is rebased, then pushed**, when it's one [sync
 rebases](#repos-sync) — the same branches, by the same rules. It's the same

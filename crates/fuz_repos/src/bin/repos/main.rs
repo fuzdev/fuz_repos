@@ -23,7 +23,8 @@
 //!
 //! Busy detection reads the live Claude Code sessions recorded under
 //! `CLAUDE_CONFIG_DIR` and `~/.claude`, excluding the calling one
-//! (`CLAUDE_PID`, when it's an ancestor of this process). Under
+//! (`CLAUDE_PID`, when it's an ancestor of this process) at its own places
+//! and the checkout the tool runs in. Under
 //! `CLAUDECODE` (an agent's shell) `sync` and `push` run as a person's —
 //! but for `push --new-branch`, creating a remote branch, which is the
 //! user's and refused there.

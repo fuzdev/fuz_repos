@@ -6,17 +6,17 @@
 //! `sync`'s own rebase, when it diverged from origin's — and nothing else.
 //!
 //! **The pipeline.** For the targets' entries alone, what `sync` runs before
-//! it acts: probe each, fetching it first as `status --fetch` does (the
-//! same hardened fetch, remote-tracking refs alone, and the visibility
-//! check); read the live sessions after the fetches, the caller's own
-//! excluded; classify. Then, for each target, read the branch its checkout
-//! has checked out and act on that branch's verdict alone, when it's a push
-//! or a rebase. A push is `Actor::push` — the one push `sync` makes, with
-//! every re-check it makes right before (the live sessions, the branch as
-//! classified, origin's push URL, the commits ahead) and its race closures
-//! (the lease on the fetched tip, the registry's URL pushed to directly,
-//! the remote-tracking ref moved by compare-and-swap: the `sync` module doc
-//! says how).
+//! it acts: probe each, fetching it first as `status --fetch` does (the same
+//! hardened fetch, remote-tracking refs alone, and the visibility check);
+//! read the live sessions after the fetches, the caller excluded where
+//! `busy` excludes it; classify. Then, for each target, read the branch its
+//! checkout has checked out and act on that branch's verdict alone, when
+//! it's a push or a rebase. A push is `Actor::push` — the one push `sync`
+//! makes, with every re-check it makes right before (the live sessions, the
+//! branch as classified, origin's push URL, the commits ahead) and its race
+//! closures (the lease on the fetched tip, the registry's URL pushed to
+//! directly, the remote-tracking ref moved by compare-and-swap: the `sync`
+//! module doc says how).
 //!
 //! **A diverged branch is rebased, then pushed**, when it's one `sync`
 //! rebases (`classify`'s `rebase_blocker` says which) — through

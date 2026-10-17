@@ -21,7 +21,7 @@ use fuz_repos::report::{CloneOutcome, CloneSyncHold, FetchOutcome, UnregisteredK
 use fuz_repos::sessions::{LiveSessions, SessionSource, Unavailable};
 use fuz_repos::state::{CloneHold, CloneRecipe, CloneVerdict, Presence, Verdict};
 use fuz_repos::sync::SyncRun;
-use support::busy::live_session;
+use support::busy::{calling, live_session};
 use support::sync::outcomes;
 use support::{
     FixtureWorkspace, LiveChild, OWNER, THIRD_PARTY, arriving_after, files, find_entry, quiet,
@@ -606,6 +606,16 @@ fn a_session_at_the_missing_path_holds_its_clone() {
         by: CloneHold::Busy,
     });
     assert_eq!(find_entry(&run.entries, "app").clone, held);
+    // the caller's own place there holds nothing
+    let caller = LiveSessions::Known(vec![calling(
+        live_session(&child, &deep, SessionSource::SessionFile),
+        None,
+    )]);
+    let run = ws.status_live(&caller);
+    assert_eq!(
+        find_entry(&run.entries, "app").clone,
+        Some(verdict_act("app"))
+    );
 
     // as classified
     let run = ws.sync_with(4, &|| live.clone());

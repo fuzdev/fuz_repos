@@ -10,7 +10,9 @@ use std::path::{Path, PathBuf};
 use fuz_repos::report::Sessions;
 use fuz_repos::sessions::{LiveSessions, Session, SessionSource};
 use fuz_repos::state::{BranchHold, UnprobedWhy, Verdict};
-use support::busy::{ahead_branch, app, child_session, claude_dir, held, push, read, read_as};
+use support::busy::{
+    ahead_branch, app, calling, child_session, claude_dir, held, push, read, read_as, read_as_in,
+};
 use support::{FixtureWorkspace, LiveChild, branch, dead_pid, find_entry, path};
 
 /// `app`, and `lib` with `feat` ahead 1 checked out in an agent worktree
@@ -135,7 +137,8 @@ fn a_worktree_claude_code_locked_is_busy_with_the_live_session_its_lock_names() 
         assert_lib_feat(&ws, &live, &wt, None);
     }
 
-    // the caller's own lock: its worktree is its own to act on
+    // the caller's own lock is its subagent's, which shares its pid: held,
+    // run from anywhere but in that worktree
     relock(
         &ws,
         &lib,
@@ -143,9 +146,19 @@ fn a_worktree_claude_code_locked_is_busy_with_the_live_session_its_lock_names() 
         &format!("claude agent agent-a1 (pid {pid} start {start})"),
     );
     let as_caller = read_as(&claude, &agent, true);
-    assert_eq!(as_caller, LiveSessions::Known(vec![]));
-    assert_lib_feat(&ws, &as_caller, &wt, None);
-    // unless the process tree doesn't back the claim
+    let callers = calling(s.clone(), None);
+    assert_eq!(as_caller, LiveSessions::Known(vec![callers.clone()]));
+    assert_lib_feat(&ws, &as_caller, &wt, Some(&callers));
+    for cwd in [&app, &lib] {
+        let callers = calling(s.clone(), Some(cwd));
+        assert_lib_feat(&ws, &read_as_in(&claude, &agent, cwd), &wt, Some(&callers));
+    }
+    // the subagent running the tool in its worktree is the caller there
+    std::fs::create_dir(wt.join("src")).unwrap();
+    for cwd in [wt.clone(), wt.join("src")] {
+        assert_lib_feat(&ws, &read_as_in(&claude, &agent, &cwd), &wt, None);
+    }
+    // a claim the process tree doesn't back marks no caller
     assert_lib_feat(&ws, &read_as(&claude, &agent, false), &wt, Some(&s));
 }
 

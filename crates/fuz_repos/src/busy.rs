@@ -26,6 +26,16 @@
 //! in an entry that wasn't probed — is unscoped and never blocks: ff-only
 //! already protects uncommitted work, and a push only moves committed refs.
 //!
+//! **The caller** (`Session::calling`): what it works in is its own to act
+//! on. So its places mark nothing, nor does the checkout the tool runs in
+//! (found as a place's would be), and it's never unscoped. But a subagent
+//! runs in its parent's process, under its pid, so the caller's agent
+//! worktrees and the checkouts whose lock names it (below) may be its
+//! subagents', and hold as another session's would — all but the one the
+//! tool runs in, where the subagent running it is the caller. A place of
+//! the caller's that can't be resolved is passed over: it would mark
+//! nothing, and only roots fewer agent worktrees.
+//!
 //! A checkout whose path can't be resolved (`UnresolvedCheckout`, also a
 //! `needs_human` reason) drops out of the scoping and may be busy:
 //! `classify` holds every action on the branches checked out there, as for
@@ -115,8 +125,8 @@
 //! worktree's lock is what git keeps it for), the primary included. The
 //! reason is read as Claude Code's own parser reads it, and names a
 //! session as Claude Code's own liveness check would: the pid is one of
-//! the reader's live sessions — so never the caller, and only a process
-//! the reader vouched for, which Claude Code's is, the session's own — and
+//! the reader's live sessions — only a process the reader vouched for,
+//! which Claude Code's is, the session's own — and
 //! a start, when given, is that session's `starttime` to the digit, so a
 //! lock left behind by a process whose pid was since reused names no one.
 //! A lock naming no live session is passed over. The reasons are the
@@ -320,8 +330,8 @@ impl From<Unresolved> for Unavailable {
     }
 }
 
-/// Whether a live session has a place at or under `path`, a missing
-/// entry's dir, where its clone would land.
+/// Whether a live session other than the caller has a place at or under
+/// `path`, a missing entry's dir, where its clone would land.
 ///
 /// A session whose dir was deleted from under it keeps its recorded cwd
 /// there. Compared by path
@@ -337,7 +347,7 @@ pub fn any_session_under(live: &LiveSessions, path: &Path) -> bool {
         return false;
     };
     let real = resolve(path).ok();
-    sessions.iter().any(|s| {
+    sessions.iter().filter(|s| s.calling.is_none()).any(|s| {
         s.places().any(|place| {
             let place = Path::new(place);
             place.starts_with(path)
@@ -482,7 +492,7 @@ enum Attributed<'a> {
 /// `scope_sessions` over sessions the reader vouched for, the checkouts
 /// that resolved, the git dirs the probe knows (and each entry's root), and
 /// the checkouts' locks Claude Code wrote: fails when a place a session
-/// works in can't be resolved.
+/// other than the caller works in can't be resolved.
 fn scope_known(
     sessions: &[Session],
     candidates: &[Candidate<'_>],
@@ -494,11 +504,17 @@ fn scope_known(
     let reals = || candidates.iter().map(|c| c.real.as_path());
     let mut unscoped = Vec::new();
     for session in sessions {
+        let calling = session.calling.as_ref();
         let mut at: Vec<(usize, &str)> = Vec::new();
         let mut roots: Vec<PathBuf> = Vec::new();
         let mut placed = false;
         for place in session.places() {
-            let cwd = resolve(Path::new(place))?;
+            let cwd = match resolve(Path::new(place)) {
+                Ok(cwd) => cwd,
+                // the caller's own place marks nothing
+                Err(_) if calling.is_some() => continue,
+                Err(unresolved) => return Err(unresolved.into()),
+            };
             at.extend(
                 deepest_containing(&cwd, reals())
                     .into_iter()
@@ -537,6 +553,9 @@ fn scope_known(
                     let key = git_dir.to_string_lossy().into_owned();
                     for e in entries {
                         roots.extend(known.roots[e].clone());
+                        if calling.is_some() {
+                            continue;
+                        }
                         let busy = &mut per_entry[e]
                             .unlisted
                             .entry(key.clone())
@@ -557,6 +576,14 @@ fn scope_known(
         roots.extend(at.iter().filter_map(|&(e, _)| known.roots[e].clone()));
         roots.sort_unstable();
         roots.dedup();
+        // the caller's own: where it works, and where the tool runs
+        let own = calling.map_or_else(Vec::new, |calling| {
+            let mut own = std::mem::take(&mut at);
+            if let Some(cwd) = &calling.cwd {
+                own.extend(checkouts_at(cwd, candidates, known));
+            }
+            own
+        });
         // the checkouts Claude Code locked for it, wherever they are
         at.extend(
             locks
@@ -576,9 +603,11 @@ fn scope_known(
                     .map(|i| (candidates[i].entry, candidates[i].checkout)),
             );
         }
+        at.retain(|c| !own.contains(c));
+        working.retain(|c| !own.contains(c));
         at.sort_unstable();
         at.dedup();
-        if at.is_empty() && !placed {
+        if at.is_empty() && !placed && calling.is_none() {
             unscoped.push(session.clone());
         }
         for (e, checkout) in at {
@@ -597,6 +626,28 @@ fn scope_known(
         }
     }
     Ok((Sessions::Available { unscoped }, per_entry))
+}
+
+/// The checkouts `cwd` (the tool's own) sits in, as a session's place
+/// there would mark them by its path or the git dir found from it; none
+/// when it can't be resolved.
+fn checkouts_at<'a>(
+    cwd: &Path,
+    candidates: &[Candidate<'a>],
+    known: &KnownGitDirs<'a>,
+) -> Vec<(usize, &'a str)> {
+    let Ok(cwd) = resolve(cwd) else {
+        return Vec::new();
+    };
+    let mut at: Vec<(usize, &str)> =
+        deepest_containing(&cwd, candidates.iter().map(|c| c.real.as_path()))
+            .into_iter()
+            .map(|i| (candidates[i].entry, candidates[i].checkout))
+            .collect();
+    if let Attributed::Checkouts { owners, .. } = attributed(&cwd, known) {
+        at.extend(owners);
+    }
+    at
 }
 
 /// Where a session at `cwd` (resolved) works by git's own lights: the

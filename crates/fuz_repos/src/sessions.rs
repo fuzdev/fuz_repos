@@ -36,11 +36,15 @@
 //! just exited), names a dir since removed, or isn't UTF-8 adds nothing,
 //! and the recorded cwd still applies.
 //!
-//! **The caller** is excluded — the session `$CLAUDE_PID` names, and a
-//! roster worker whose `replPid` it is — but only when that pid is an
-//! ancestor of this process (`caller_ancestors`, by the ppid chain in
-//! `/proc`). Anything else can set the variable, and a claim the process
-//! tree doesn't back excludes nothing.
+//! **The caller** — the session `$CLAUDE_PID` names, and a roster worker
+//! whose `replPid` it is — is marked (`Session::calling`), but only when
+//! that pid is an ancestor of this process (`caller_ancestors`, by the ppid
+//! chain in `/proc`). Anything else can set the variable, and a claim the
+//! process tree doesn't back marks nothing. `busy` excludes the caller only
+//! at its own places and the checkout the tool runs in: its subagents run
+//! in its process, so they share its pid, and its holds on their other
+//! worktrees stand. A `repos` detached from the session's process tree (a
+//! `setsid` or double-fork) has no such ancestor, so it isn't the caller.
 //!
 //! **Fail closed.** No sessions dir means nothing is live. But a live
 //! session the reader can't vouch for makes detection `Unavailable`, and
@@ -52,9 +56,9 @@
 //! `CLAUDE_CONFIG_DIR` alone isn't every dir), a config dir given as a
 //! relative path (which the tool's cwd would resolve, not the session's), a
 //! session's cwd (or worktree, or process cwd) that can't be resolved (when
-//! `busy` scopes it), or no `/proc` at all (not Linux, or not mounted) while
-//! anything is recorded. A format change degrades `sync` to fetching; it
-//! never silently drops the guard.
+//! `busy` scopes it; the caller's aside), or no `/proc` at all (not Linux,
+//! or not mounted) while anything is recorded. A format change degrades
+//! `sync` to fetching; it never silently drops the guard.
 //!
 //! **Limits.** A Claude process that writes no session file and is no
 //! roster worker is invisible — an out-of-process agent-team teammate, or
@@ -107,6 +111,18 @@ pub struct Session {
     /// Where its process is now (`/proc/<pid>/cwd`), when that's not `cwd`.
     pub process_cwd: Option<String>,
     pub source: SessionSource,
+    /// Set when it's the caller's (the module doc's **The caller**). Not in
+    /// the report.
+    #[serde(skip)]
+    pub calling: Option<Calling>,
+}
+
+/// What `busy` needs of the caller's session beside its places: where the
+/// tool runs, a checkout that's the caller's own to act on.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Calling {
+    /// The tool's own cwd, when it could be read (`SessionsSource::cwd`).
+    pub cwd: Option<PathBuf>,
 }
 
 impl Session {
@@ -119,6 +135,7 @@ impl Session {
             worktree: None,
             process_cwd: None,
             source,
+            calling: None,
         }
     }
 
@@ -182,12 +199,13 @@ pub enum Unavailable {
 /// What the reader found.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LiveSessions {
-    /// Every live session but the caller's, by pid and cwd.
+    /// Every live session, by pid and cwd, the caller's marked.
     Known(Vec<Session>),
     Unavailable(Unavailable),
 }
 
-/// Where the reader looks, and whom it excludes.
+/// Where the reader looks, whom it marks the caller, and where the tool
+/// runs.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SessionsSource {
     /// Claude Code's config dirs, each read (`config_dirs`), or why they
@@ -196,21 +214,25 @@ pub struct SessionsSource {
     /// The calling session's pid as `CLAUDE_PID` claims it.
     pub claude_pid: Option<u32>,
     /// This process's ancestors' pids and start times
-    /// (`caller_ancestors`): `claude_pid` excludes a session only when it's
+    /// (`caller_ancestors`): `claude_pid` marks a session only when it's
     /// one of them.
     pub ancestors: BTreeMap<u32, u64>,
+    /// The tool's own cwd, when it can be read: the checkout it's in is the
+    /// caller's own (`Calling`).
+    pub cwd: Option<PathBuf>,
 }
 
 impl SessionsSource {
     /// From the environment: `CLAUDE_CONFIG_DIR` and `$HOME/.claude` (an
     /// empty value counts as unset), `CLAUDE_PID` (ignored unless it's a
-    /// pid), and this process's ancestors.
+    /// pid), this process's ancestors, and its cwd.
     pub fn from_env() -> Self {
         let set = |name| std::env::var_os(name).filter(|v| !v.is_empty());
         Self {
             config_dirs: config_dirs(set("CLAUDE_CONFIG_DIR"), set("HOME")),
             claude_pid: set("CLAUDE_PID").and_then(|v| v.to_str().and_then(parse_pid)),
             ancestors: caller_ancestors(),
+            cwd: std::env::current_dir().ok(),
         }
     }
 
@@ -417,6 +439,9 @@ struct Reader {
     /// Waits out an in-place rewrite before a read is retried
     /// (`retry_torn`): `TORN_READ_RETRY`, but a seam for tests.
     pause: Box<dyn FnMut()>,
+    /// The caller's pid and start time (`SessionsSource::caller`), and how
+    /// its sessions are marked.
+    caller: Option<((u32, u64), Calling)>,
 }
 
 impl Default for Reader {
@@ -426,6 +451,7 @@ impl Default for Reader {
             proc_checked: false,
             own_domain: None,
             pause: Box::new(|| std::thread::sleep(TORN_READ_RETRY)),
+            caller: None,
         }
     }
 }
@@ -561,17 +587,28 @@ impl Reader {
         // before liveness: another domain's pid means nothing to this `/proc`
         self.check_domain(path, SessionSource::SessionFile, &record.pid_domain)?;
         let process_cwd = process_cwd(pid, &record.cwd);
+        let calling = self.calling(|(caller, _)| caller == pid);
         Ok(
             (self.liveness(pid, proc_start)? == Liveness::Live).then_some(Session {
                 process_cwd,
+                calling,
                 ..Session::at(pid, proc_start, record.cwd, SessionSource::SessionFile)
             }),
         )
     }
 
-    /// Reads `daemon/roster.json`'s live workers but the one whose session
-    /// process is `caller`.
-    fn roster(&mut self, path: &Path, caller: Option<(u32, u64)>) -> Step<Vec<Session>> {
+    /// The mark for a session `is_callers` says is the caller's, when the
+    /// caller is known.
+    fn calling(&self, is_callers: impl FnOnce((u32, u64)) -> bool) -> Option<Calling> {
+        self.caller
+            .as_ref()
+            .filter(|(caller, _)| is_callers(*caller))
+            .map(|(_, calling)| calling.clone())
+    }
+
+    /// Reads `daemon/roster.json`'s live workers, the one whose session
+    /// process is the caller marked.
+    fn roster(&mut self, path: &Path) -> Step<Vec<Session>> {
         let text = match read_bounded(path, MAX_FILE_BYTES) {
             Ok(text) => text,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
@@ -603,14 +640,13 @@ impl Reader {
             if let Some(domain) = &record.pid_domain {
                 self.check_domain(path, SessionSource::RosterWorker, domain)?;
             }
-            if caller.is_some_and(|c| record.is_callers(c)) {
-                continue;
-            }
+            let calling = self.calling(|caller| record.is_callers(caller));
             let process_cwd = process_cwd(pid, &record.cwd);
             if self.liveness(pid, proc_start)? == Liveness::Live {
                 live.push(Session {
                     worktree: record.worktree_path,
                     process_cwd,
+                    calling,
                     ..Session::at(pid, proc_start, record.cwd, SessionSource::RosterWorker)
                 });
             }
@@ -619,7 +655,7 @@ impl Reader {
     }
 
     /// Reads one config dir's session files and roster.
-    fn config_dir(&mut self, config_dir: &Path, caller: Option<(u32, u64)>) -> Step<()> {
+    fn config_dir(&mut self, config_dir: &Path) -> Step<()> {
         let dir = config_dir.join("sessions");
         match std::fs::read_dir(&dir) {
             Ok(listing) => {
@@ -643,7 +679,7 @@ impl Reader {
             Err(e) => return Err(unreadable(&dir, &e)),
         }
         let roster = config_dir.join("daemon/roster.json");
-        for s in self.retry_torn(|r| r.roster(&roster, caller))? {
+        for s in self.retry_torn(|r| r.roster(&roster))? {
             self.add(s);
         }
         Ok(())
@@ -651,7 +687,7 @@ impl Reader {
 
     /// Adds a live session, one per pid and cwd: a session file's record
     /// replaces a roster worker's, whichever config dir was read first,
-    /// keeping the worker's worktree.
+    /// keeping the worker's worktree, and either's caller mark.
     fn add(&mut self, session: Session) {
         match self.live.entry((session.pid, session.cwd.clone())) {
             Entry::Vacant(slot) => {
@@ -660,10 +696,12 @@ impl Reader {
             Entry::Occupied(mut slot) => {
                 let kept = slot.get_mut();
                 let worktree = kept.worktree.take().or_else(|| session.worktree.clone());
+                let calling = kept.calling.take().or_else(|| session.calling.clone());
                 if session.source == SessionSource::SessionFile {
                     *kept = session;
                 }
                 kept.worktree = worktree;
+                kept.calling = calling;
             }
         }
     }
@@ -675,9 +713,14 @@ impl Reader {
                 path: dir.to_string_lossy().into_owned(),
             });
         }
-        let caller = source.caller();
+        self.caller = source.caller().map(|caller| {
+            let calling = Calling {
+                cwd: source.cwd.clone(),
+            };
+            (caller, calling)
+        });
         for dir in dirs {
-            self.config_dir(dir, caller)?;
+            self.config_dir(dir)?;
         }
         Ok(())
     }
@@ -733,21 +776,12 @@ fn parse_proc_start(s: &str) -> Result<u64, String> {
     }
 }
 
-/// Every live Claude Code session on this machine but the caller's, or why
-/// that can't be vouched for.
+/// Every live Claude Code session on this machine, the caller's marked, or
+/// why that can't be vouched for.
 pub fn read_live_sessions(source: &SessionsSource) -> LiveSessions {
     let mut reader = Reader::default();
     match reader.read(source) {
-        Ok(()) => {
-            let caller = source.caller().map(|(pid, _)| pid);
-            LiveSessions::Known(
-                reader
-                    .live
-                    .into_values()
-                    .filter(|s| Some(s.pid) != caller)
-                    .collect(),
-            )
-        }
+        Ok(()) => LiveSessions::Known(reader.live.into_values().collect()),
         Err(reason) => LiveSessions::Unavailable(reason),
     }
 }

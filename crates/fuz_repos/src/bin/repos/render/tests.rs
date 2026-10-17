@@ -1,5 +1,6 @@
 use fuz_repos::registry::{EntryKind, Visibility};
 use fuz_repos::report::{BranchSync, BranchSyncHold, CloneSyncHold, FetchOutcome};
+use fuz_repos::sessions::Calling;
 use fuz_repos::state::{
     AtRest, BranchHold, Checkout, CloneHold, CloneRecipe, Head, InProgressOp, Layout, ProbeError,
     ProbeErrorKind, RefreshHold, UnprobedWorktree, UnprobedWorktreeStatus,
@@ -1652,6 +1653,11 @@ fn busy_holds_and_sessions() {
             process_cwd: Some("/home/me/dev/app/src".into()),
             ..s(42, "/home/me/dev")
         },
+        // the caller's, held by its subagent's worktree
+        Session {
+            calling: Some(Calling { cwd: None }),
+            ..s(43, "/home/me/dev/app")
+        },
     ];
     let mut r = report(vec![app]);
     r.sessions = Sessions::Available {
@@ -1677,7 +1683,8 @@ clean 0 · on branches 0 · pinned 0      ~/dev/repos.toml · fetched 3h ago
     assert!(
         block.contains(
             "  checkout  ~/dev/app on main · clean · busy: pid 41 (~/dev/app/src), \
-             pid 42 (~/dev, worktree ~/dev/app/.claude/worktrees/w, now ~/dev/app/src)\n"
+             pid 42 (~/dev, worktree ~/dev/app/.claude/worktrees/w, now ~/dev/app/src), \
+             pid 43 (~/dev/app, this session's subagents)\n"
         ),
         "{block}"
     );

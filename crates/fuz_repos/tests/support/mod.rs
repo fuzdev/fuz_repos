@@ -1577,6 +1577,7 @@ const fn no_sessions() -> SessionsSource {
         config_dirs: Ok(Vec::new()),
         claude_pid: None,
         ancestors: BTreeMap::new(),
+        cwd: None,
     }
 }
 

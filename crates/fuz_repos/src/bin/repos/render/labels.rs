@@ -181,7 +181,8 @@ pub(super) fn unavailable_label(reason: &Unavailable, view: View<'_>) -> String 
 }
 
 /// A session as `--verbose` lists it: pid, and cwd — and its worktree and
-/// its process's cwd, when it has them.
+/// its process's cwd, when it has them, and whether it's the caller's — its
+/// marks that hold are its subagents'.
 pub(super) fn session_label(s: &Session, view: View<'_>) -> String {
     let mut label = format!("pid {} ({}", s.pid, view.show(&s.cwd));
     if let Some(worktree) = &s.worktree {
@@ -189,6 +190,9 @@ pub(super) fn session_label(s: &Session, view: View<'_>) -> String {
     }
     if let Some(now) = &s.process_cwd {
         let _ = write!(label, ", now {}", view.show(now));
+    }
+    if s.calling.is_some() {
+        label.push_str(", this session's subagents");
     }
     label.push(')');
     label

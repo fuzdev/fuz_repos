@@ -204,6 +204,7 @@ fn a_file_rewritten_during_the_pause_is_read_whole() {
         config_dirs: Ok(vec![dir.clone()]),
         claude_pid: None,
         ancestors: BTreeMap::new(),
+        cwd: None,
     };
     let session_file = dir.join(format!("sessions/{pid}.json"));
     let roster = dir.join("daemon/roster.json");
@@ -269,6 +270,7 @@ fn the_caller_is_an_ancestor_or_nobody() {
         config_dirs: Ok(vec![]),
         claude_pid,
         ancestors: BTreeMap::from([(10, 100), (20, 50)]),
+        cwd: None,
     };
     assert_eq!(source(Some(10)).caller(), Some((10, 100)));
     assert_eq!(source(Some(11)).caller(), None);
@@ -357,6 +359,7 @@ fn a_relative_config_dir_naming_a_read_one_is_refused_not_merged() {
             config_dirs: dirs,
             claude_pid: None,
             ancestors: BTreeMap::new(),
+            cwd: None,
         };
         assert!(
             matches!(

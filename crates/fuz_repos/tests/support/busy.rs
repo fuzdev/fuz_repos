@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 
 use super::{ClaudeDir, FixtureWorkspace, LiveChild, path, write};
 use fuz_repos::sessions::{
-    LiveSessions, Session, SessionSource, SessionsSource, read_live_sessions,
+    Calling, LiveSessions, Session, SessionSource, SessionsSource, read_live_sessions,
 };
 use fuz_repos::state::{BranchHold, SyncAction, Verdict};
 
@@ -51,12 +51,23 @@ pub fn child_session(child: &LiveChild, cwd: &Path, source: SessionSource) -> Se
     }
 }
 
+/// `session` marked the caller's, the tool run from `cwd`.
+pub fn calling(session: Session, cwd: Option<&Path>) -> Session {
+    Session {
+        calling: Some(Calling {
+            cwd: cwd.map(Path::to_owned),
+        }),
+        ..session
+    }
+}
+
 /// Where the tool would look given `dirs`, with no `CLAUDE_PID`.
 pub fn source(dirs: &[&ClaudeDir]) -> SessionsSource {
     SessionsSource {
         config_dirs: Ok(dirs.iter().map(|d| d.0.clone()).collect()),
         claude_pid: None,
         ancestors: BTreeMap::new(),
+        cwd: None,
     }
 }
 
@@ -74,6 +85,17 @@ pub fn read_as(claude: &ClaudeDir, caller: &LiveChild, ancestor: bool) -> LiveSe
         let start = caller.proc_start().parse().unwrap();
         source.ancestors.insert(caller.pid(), start);
     }
+    read_live_sessions(&source)
+}
+
+/// `read_as` with `caller` an ancestor, the tool run from `cwd`.
+pub fn read_as_in(claude: &ClaudeDir, caller: &LiveChild, cwd: &Path) -> LiveSessions {
+    let mut source = source(&[claude]);
+    source.claude_pid = Some(caller.pid());
+    source
+        .ancestors
+        .insert(caller.pid(), caller.proc_start().parse().unwrap());
+    source.cwd = Some(cwd.to_owned());
     read_live_sessions(&source)
 }
 

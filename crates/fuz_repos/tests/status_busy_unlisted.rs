@@ -12,7 +12,7 @@ use fuz_repos::classify::NeedsHuman;
 use fuz_repos::report::Sessions;
 use fuz_repos::sessions::{LiveSessions, SessionSource};
 use fuz_repos::state::{BranchHold, Head, Verdict};
-use support::busy::{MAX_GITFILE_BYTES, ahead_branch, app, held, push, session};
+use support::busy::{MAX_GITFILE_BYTES, ahead_branch, app, calling, held, push, session};
 use support::{FixtureWorkspace, branch, find_entry, path};
 
 /// `app` with `main` ahead in the primary and `other` ahead, checked out
@@ -111,6 +111,12 @@ fn a_session_in_a_hand_made_git_dir_holds_the_branch_it_is_on() {
             &[("other", 2)],
             &[("main", 1)],
         );
+        // the caller working through it: its own to act on
+        let caller = calling(session(9, &hand, SessionSource::SessionFile), None);
+        let run = ws.status_live(&LiveSessions::Known(vec![caller]));
+        let e = find_entry(&run.entries, "app");
+        assert_eq!(e.needs_human, []);
+        assert_eq!(branch(e, "other").verdict, Verdict::Act { action: push(2) });
     }
 }
 

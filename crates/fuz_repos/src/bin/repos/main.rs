@@ -200,14 +200,16 @@ struct SyncArgs {
 /// branch and the checkout move to new commits, which the report names.
 /// Never force-pushes, pushes a tag, resolves a conflict, or touches
 /// another branch, and creates a remote branch only under --new-branch (the
-/// user's); a checkout another live session works in, and origin drift,
-/// hold it. Exits 0 when every branch ends in sync with its upstream
-/// (pushed, rebased and pushed, created, or already there), 1 when any
-/// didn't (held, behind, diverged and left to a person, a rebase a conflict
-/// stopped, detached, no upstream, a remote branch in the way, a failed
-/// fetch or push), 2 for usage (an unknown target, the cwd in no entry's
-/// checkout, a third-party or pinned target, --new-branch in an agent's
-/// shell).
+/// user's); a checkout another live session works in, origin drift, and
+/// Git LFS pointers it would send (until --lfs-uploaded), hold it. Exits 0
+/// when every branch ends in sync with its upstream (pushed, rebased and
+/// pushed, created, or already there), 1 when any didn't (held, behind,
+/// diverged and left to a person, a rebase a conflict stopped, detached, no
+/// upstream, a remote branch in the way, a failed fetch or push), 2 for
+/// usage (an unknown target, the cwd in no entry's checkout, a third-party
+/// or pinned target, --new-branch in an agent's shell).
+// A flat bundle of CLI switches, not domain state.
+#[allow(clippy::struct_excessive_bools)]
 #[derive(FromArgs, Debug)]
 #[argh(subcommand, name = "push")]
 struct PushArgs {
@@ -223,6 +225,11 @@ struct PushArgs {
     /// user's: refused in an agent's shell (CLAUDECODE set)
     #[argh(switch)]
     new_branch: bool,
+    /// push a branch held only for the Git LFS pointers it would send
+    /// (repos runs no hook, so Git LFS's own upload never runs): say so
+    /// once git lfs push origin <branch> has uploaded their objects
+    #[argh(switch)]
+    lfs_uploaded: bool,
     /// print the report as JSON
     #[argh(switch)]
     json: bool,
@@ -560,6 +567,7 @@ fn run_push(cx: &Context<'_>, args: &PushArgs) -> Result<Printed> {
         &args.targets,
         PushReportOptions {
             new_branch: args.new_branch,
+            lfs_uploaded: args.lfs_uploaded,
             caller: Caller::from_env(),
             jobs: args.jobs,
             sessions: &cx.sessions,

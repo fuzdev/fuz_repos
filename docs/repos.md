@@ -61,6 +61,7 @@ repos sync --references      # refresh every third-party reference too (never a 
 repos push                   # the gateway: fetch, then push the branch checked out here as a fast-forward of what was fetched, rebasing a diverged registry branch first; exit 1 unless it ends in sync
 repos push app ../wt --json  # targets: a key or dir name (the entry's own checkout), or a path (the checkout holding it); --json prints the versioned outcome report
 repos push --new-branch      # the user's (refused under CLAUDECODE): create the branch on origin when it has no upstream there, and track it as git push -u does
+repos push --lfs-uploaded    # push a branch held for the Git LFS pointers it would send, once git lfs push origin <branch> has uploaded their objects
 repos --version              # the crate version, the commit the binary was built from, and each --json document's format version
 repos --registry <file> --root <dir> status # a registry kept outside the workspace
 
@@ -475,6 +476,20 @@ dirty checkout, since a push moves refs alone. A diverged one is held
 unstaged, or untracked, the same reading of clean sync's rebase uses — with
 nothing moved: commit, or `git stash -u`, then `repos push` again. A branch
 checked out in several checkouts is held too (`several_checkouts`).
+
+**Git LFS pointers hold it.** `repos` runs no hook, so Git LFS's `pre-push`
+upload never runs. A push, a rebase's, or a `--new-branch` creation that would
+send a Git LFS pointer is held (`lfs_objects`), and so is one whose objects are
+too many to read for them (`lfs_unscanned`); `sync` holds the same, and
+`status` previews it. A pointer is read from the objects alone, never from
+`.gitattributes`: a blob under 1024 bytes whose first non-blank line is `version
+https://git-lfs.github.com/spec/v1` (or one of the two older spec URLs Git LFS
+still reads), followed by an `oid` and a `size` line, among the objects the
+branch's commit reaches past origin's remote-tracking refs. Upload them, then
+push: `git lfs push origin <branch>` (Git LFS must be installed), then `repos
+push --lfs-uploaded`, which lifts the Git LFS holds and no other, for an agent too.
+`sync` never lifts it: check the branch out, then `repos push --lfs-uploaded`
+there.
 
 **Policy.** The policy is structural: owned entries only (a third-party
 reference or a pin named is a usage error), never a force or a tag; another

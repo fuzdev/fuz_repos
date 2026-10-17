@@ -1,7 +1,7 @@
 {
-	"version": 13,
+	"version": 14,
 	"status": {
-		"version": 19,
+		"version": 20,
 		"workspace": "/home/me/dev",
 		"registry": "/home/me/dev/repos.toml",
 		"fetched": true,
@@ -335,6 +335,46 @@
 								"kind": "fast_forward",
 								"commits": 1
 							}
+						}
+					},
+					{
+						"name": "assets",
+						"upstream": "origin/assets",
+						"worktree": null,
+						"symref": null,
+						"unique_commits": 0,
+						"newest_commit_at": 1799827200,
+						"relation": {
+							"kind": "ahead",
+							"commits": 2
+						},
+						"verdict": {
+							"kind": "held",
+							"action": {
+								"kind": "push",
+								"commits": 2
+							},
+							"by": "lfs_objects"
+						}
+					},
+					{
+						"name": "import",
+						"upstream": "origin/import",
+						"worktree": null,
+						"symref": null,
+						"unique_commits": 0,
+						"newest_commit_at": 1799827200,
+						"relation": {
+							"kind": "ahead",
+							"commits": 1
+						},
+						"verdict": {
+							"kind": "held",
+							"action": {
+								"kind": "push",
+								"commits": 1
+							},
+							"by": "lfs_unscanned"
 						}
 					},
 					{
@@ -2032,6 +2072,26 @@
 						"commits": 1
 					},
 					"by": "busy_unknown",
+					"repeats": null
+				},
+				{
+					"name": "assets",
+					"kind": "held",
+					"action": {
+						"kind": "push",
+						"commits": 2
+					},
+					"by": "lfs_objects",
+					"repeats": null
+				},
+				{
+					"name": "import",
+					"kind": "held",
+					"action": {
+						"kind": "push",
+						"commits": 1
+					},
+					"by": "lfs_unscanned",
 					"repeats": null
 				},
 				{

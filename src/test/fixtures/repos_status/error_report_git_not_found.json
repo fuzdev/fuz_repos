@@ -1,5 +1,5 @@
 {
-	"version": 19,
+	"version": 20,
 	"error": {
 		"kind": "git_not_found",
 		"message": "git not found on PATH",

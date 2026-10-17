@@ -457,6 +457,17 @@ pub enum BranchHold {
     /// through a git dir sharing the repo's refs that no worktree list names
     /// (an `unlisted_git_dir` reason), whose HEAD is on it or unknown.
     BusyUnknown,
+    /// The push would send Git LFS pointers (the `lfs` module), whose
+    /// objects only Git LFS's own push uploads — a hook the tool never
+    /// runs — so the host may not hold them: GitHub refuses such a push.
+    /// Pushes only, and a rebase, which ends in one; named after every other
+    /// hold, since it's the one `repos push --lfs-uploaded` lifts, once the
+    /// user has uploaded them (`git lfs push origin <branch>`).
+    LfsObjects,
+    /// The push would send more objects than the scan for Git LFS pointers
+    /// reads, so whether it adds one is unknown: held, and lifted, as
+    /// `LfsObjects` is.
+    LfsUnscanned,
 }
 
 /// What holds a reference's refresh back (`RefreshVerdict::Held`): it's

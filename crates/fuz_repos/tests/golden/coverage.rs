@@ -201,6 +201,8 @@ floor_index!(
         BranchHold::SeveralCheckouts,
         BranchHold::Busy,
         BranchHold::BusyUnknown,
+        BranchHold::LfsObjects,
+        BranchHold::LfsUnscanned,
     ]
 );
 floor_index!(
@@ -812,6 +814,8 @@ floor_index!(
         BranchSyncHold::SeveralCheckouts,
         BranchSyncHold::Busy,
         BranchSyncHold::BusyUnknown,
+        BranchSyncHold::LfsObjects,
+        BranchSyncHold::LfsUnscanned,
         BranchSyncHold::Changed,
     ]
 );

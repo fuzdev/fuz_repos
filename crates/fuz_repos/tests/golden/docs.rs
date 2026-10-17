@@ -72,6 +72,7 @@ pub fn status_report_doc() -> StatusReport {
         fuz_ui(),
         uz(),
         pushy(),
+        assets(),
         fetchy(),
         sparse_fork(),
         renamed_default(),
@@ -838,6 +839,26 @@ pub fn sync_report_doc() -> SyncReport {
             BranchOutcome::Held {
                 action: ff(1),
                 by: BranchSyncHold::BusyUnknown,
+            },
+        ),
+        (
+            "assets",
+            Relation::Ahead { commits: 2 },
+            held_by(push(2), BranchHold::LfsObjects),
+            None,
+            BranchOutcome::Held {
+                action: push(2),
+                by: BranchSyncHold::LfsObjects,
+            },
+        ),
+        (
+            "import",
+            Relation::Ahead { commits: 1 },
+            held_by(push(1), BranchHold::LfsUnscanned),
+            None,
+            BranchOutcome::Held {
+                action: push(1),
+                by: BranchSyncHold::LfsUnscanned,
             },
         ),
         (
@@ -2777,6 +2798,30 @@ fn pushy() -> EntryStatus {
             },
         }),
         ..entry("pushy", Some("main"))
+    }
+}
+
+/// A repo whose pushes would send Git LFS pointers: `main` adds some, and
+/// `import`'s range is too large to read for them.
+fn assets() -> EntryStatus {
+    let held = |name: &str, commits, by| BranchStatus {
+        unique_commits: commits,
+        ..branch(
+            name,
+            Some(&format!("origin/{name}")),
+            Relation::Ahead { commits },
+            Verdict::Held {
+                action: SyncAction::Push { commits },
+                by,
+            },
+        )
+    };
+    EntryStatus {
+        branches: vec![
+            checked_out(held("main", 2, BranchHold::LfsObjects), "assets"),
+            held("import", 1, BranchHold::LfsUnscanned),
+        ],
+        ..entry("assets", Some("main"))
     }
 }
 

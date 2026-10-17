@@ -22,6 +22,7 @@ use crate::git::{CallOptions, Git, GitError, NetworkOptions};
 use crate::gitdir::{
     GitdirTarget, WorktreeGitDir, dot_git_target, read_head, read_worktree_git_dirs,
 };
+use crate::lfs::{LfsScan, scan_lfs};
 use crate::paths::{canonical, realpath_forgiving};
 use crate::porcelain::{
     self, ConfigFacts, RefFacts, StatusFacts, Track, WorktreeHead, WorktreeRecord,
@@ -314,6 +315,12 @@ pub struct BranchFacts {
     /// commit the branch no longer holds; read where `local_merges` is,
     /// else false.
     pub local_tagged: bool,
+    /// The Git LFS pointers among the objects its commit reaches past
+    /// origin's remote-tracking refs (`scan_lfs`): what a push, a
+    /// rebase's included, or `--new-branch`'s creation would send. Read
+    /// for a branch of an entry sync may push (owned, neither pinned nor
+    /// archived) that `could_carry_local_work`, else `Skipped`.
+    pub lfs: LfsScan,
 }
 
 /// Whether a branch might hold commits on no remote.
@@ -472,7 +479,8 @@ fn probe_present(
         .map_err(|e| git_failure(&e))?;
     let status = porcelain::parse_status(&status).map_err(unexpected_output)?;
 
-    let branches = probe_branches(cx.git, dir, &shallow_roots, local)?;
+    let pushes = syncs_owned(entry) && !entry.archived;
+    let branches = probe_branches(cx.git, dir, &shallow_roots, pushes, local)?;
 
     // where a push through origin goes, rewrites applied, when sync may
     // push a branch of the entry (an archived repo's are a person's):
@@ -770,7 +778,9 @@ fn fetch_origin(
 }
 
 /// Every local branch, with its commits on no remote counted where local
-/// work could be (`could_carry_local_work`, `count_unique`).
+/// work could be (`could_carry_local_work`, `count_unique`) — and there, in
+/// an entry whose branches sync may push (`pushes`), the Git LFS pointers a
+/// push would send (`scan_lfs`).
 ///
 /// # Errors
 ///
@@ -779,6 +789,7 @@ fn probe_branches(
     git: &Git,
     dir: &Path,
     shallow_roots: &HashSet<String>,
+    pushes: bool,
     local: CallOptions<'_>,
 ) -> Result<Vec<BranchFacts>, ProbeError> {
     let format = format!("--format={}", porcelain::REFS_FORMAT);
@@ -794,12 +805,18 @@ fn probe_branches(
             (0, false)
         };
         let (local_merges, local_tagged) = diverged_facts(git, dir, &r, shallow_roots, local)?;
+        let lfs = if pushes && could_carry_local_work(&r) {
+            scan_lfs(git, dir, &r.oid, local).map_err(|e| git_failure(&e))?
+        } else {
+            LfsScan::Skipped
+        };
         branches.push(BranchFacts {
             branch: r,
             unique_commits,
             on_fetched_tip,
             local_merges,
             local_tagged,
+            lfs,
         });
     }
     Ok(branches)

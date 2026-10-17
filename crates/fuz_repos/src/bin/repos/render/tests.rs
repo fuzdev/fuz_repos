@@ -3314,3 +3314,77 @@ fn rebases_read_as_what_sync_would_do_and_did() {
         "{text}"
     );
 }
+
+/// The upload command names the one held branch, quoted for a shell, and
+/// leaves several to the reader — two repos on one branch name included.
+#[test]
+fn lfs_hint_names_the_one_branch() {
+    let one = lfs_hint(&[("app", "topic")]);
+    assert!(one.contains("run git lfs push origin topic, then"), "{one}");
+    let quoted = lfs_hint(&[("app", "it's")]);
+    assert!(
+        quoted.contains(r"git lfs push origin 'it'\''s', then"),
+        "{quoted}"
+    );
+    // a name git lfs would read as a flag, as its ref
+    let dash = lfs_hint(&[("app", "-dash")]);
+    assert!(
+        dash.contains("git lfs push origin refs/heads/-dash, then"),
+        "{dash}"
+    );
+    let generic = "git lfs push origin <branch> for each held branch, in its repo, then";
+    for several in [
+        lfs_hint(&[("app", "main"), ("app", "topic")]),
+        lfs_hint(&[("app", "main"), ("lib", "main")]),
+        // a branch the report doesn't name
+        lfs_hint(&[("app", "")]),
+    ] {
+        assert!(several.contains(generic), "{several}");
+    }
+}
+
+/// Two entries held for Git LFS on the same branch name are two uploads,
+/// one in each repo: the hint names neither.
+#[test]
+fn lfs_holds_in_two_repos_on_one_branch_name_read_as_several() {
+    let held = |key: &str| {
+        let mut e = entry(key, main(), "main");
+        e.branches = vec![branch(
+            "main",
+            Some("origin/main"),
+            Relation::Ahead { commits: 1 },
+            1,
+            Verdict::Held {
+                action: SyncAction::Push { commits: 1 },
+                by: BranchHold::LfsObjects,
+            },
+        )];
+        e
+    };
+    let generic = "git lfs push origin <branch> for each held branch, in its repo, then";
+    let text = render_summary(&report(vec![held("app"), held("lib")]), VIEW, false);
+    assert!(text.contains(generic), "{text}");
+    assert!(!text.contains("git lfs push origin main"), "{text}");
+    // one of them alone is named
+    let text = render_summary(&report(vec![held("app")]), VIEW, false);
+    assert!(text.contains("git lfs push origin main, then"), "{text}");
+    // and so `repos push` reads them
+    let target = |key: &str| CheckoutPush {
+        key: key.into(),
+        checkout: format!("/home/me/dev/{key}"),
+        branch: Some("main".into()),
+        fetch: FetchOutcome::Fetched,
+        outcome: PushOutcome::Held {
+            by: BranchSyncHold::LfsObjects,
+        },
+    };
+    let pushed = PushReport::new(
+        report(vec![held("app"), held("lib")]),
+        vec![target("app"), target("lib")],
+    );
+    let text = render_push_summary(&pushed, VIEW);
+    assert!(text.contains(generic), "{text}");
+    let pushed = PushReport::new(report(vec![held("app")]), vec![target("app")]);
+    let text = render_push_summary(&pushed, VIEW);
+    assert!(text.contains("git lfs push origin main, then"), "{text}");
+}

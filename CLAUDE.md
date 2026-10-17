@@ -140,11 +140,14 @@ Each is structural, in the code (the rustdoc of `sync.rs`, `push.rs`,
   session working (busy — [what it can't see](docs/repos.md#busy-detection)),
   and holds every branch action when it can't vouch for the sessions — a
   clone of a missing entry still runs, since it only creates a dir
-- never runs hooks, an fsmonitor, or background maintenance. Programs the
-  user's own git config names (filter drivers, the gpg program, credential
-  helpers, SSH) run as in any git call, with one exception: a rebase's
-  replay runs no merge driver — git is handed a command that fails in its
-  place — since merging a path is settling a conflict
+- never runs hooks, an fsmonitor, or background maintenance — Git LFS's
+  `pre-push` upload among them, so a push that would send Git LFS pointers
+  is held until the user uploads them and runs `repos push --lfs-uploaded`.
+  Programs the user's own git config names (filter drivers, the gpg
+  program, credential helpers, SSH) run as in any git call, with one
+  exception: a rebase's replay runs no merge driver — git is handed a
+  command that fails in its place — since merging a path is settling a
+  conflict
 - never installs, builds, calls the GitHub API, or reads env files: git is
   the only program it runs (and `kill`, to stop a timed-out call), and it
   holds no credential of its own

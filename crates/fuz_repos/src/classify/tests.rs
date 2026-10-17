@@ -70,6 +70,7 @@ struct B<'a> {
     on_tip: bool,
     merges: u32,
     tagged: bool,
+    lfs: LfsScan,
 }
 
 const fn b<'a>(name: &'a str, remote: Option<&'a str>, resolved: bool, track: Track) -> B<'a> {
@@ -82,6 +83,7 @@ const fn b<'a>(name: &'a str, remote: Option<&'a str>, resolved: bool, track: Tr
         on_tip: false,
         merges: 0,
         tagged: false,
+        lfs: LfsScan::Skipped,
     }
 }
 
@@ -100,6 +102,10 @@ impl B<'_> {
     }
     const fn tagged(mut self) -> Self {
         self.tagged = true;
+        self
+    }
+    const fn lfs(mut self, scan: LfsScan) -> Self {
+        self.lfs = scan;
         self
     }
 }
@@ -140,6 +146,7 @@ fn facts(head: Head, branches: &[B<'_>]) -> RepoFacts {
             on_fetched_tip: b.on_tip,
             local_merges: b.merges,
             local_tagged: b.tagged,
+            lfs: b.lfs,
         })
         .collect();
     test_facts(head, config, branches)
@@ -3542,5 +3549,103 @@ fn a_rebase_is_held_as_a_fast_forward_and_a_push_are() {
     assert_eq!(
         verdicts_with(&e, &fresh(), &unavailable)[0],
         held(BranchHold::BusyUnknown)
+    );
+}
+
+/// Git LFS pointers among what a push would send hold it, and a rebase,
+/// which ends in one — after every other hold, since `--lfs-uploaded` lifts
+/// this one alone; a fast-forward sends nothing, so they never hold one.
+#[test]
+fn git_lfs_pointers_hold_a_push_and_a_rebase_after_every_other_hold() {
+    let push = SyncAction::Push { commits: 1 };
+    let rebase = SyncAction::Rebase {
+        ahead: 1,
+        behind: 1,
+    };
+    let diverged = Track::Diverged {
+        ahead: 1,
+        behind: 1,
+    };
+    let e = owned(Mode::Follow("main"));
+    let with = |scan| {
+        let mut f = facts(
+            on("main"),
+            &[
+                b("main", O, true, Track::Ahead(1)).unique(1).lfs(scan),
+                b("feat", O, true, Track::Behind(1)).lfs(scan),
+                b("dev", O, true, diverged).unique(1).lfs(scan),
+            ],
+        );
+        f.branches[0].branch.worktree = Some("/ws/app".into());
+        f
+    };
+    let held = |action, by| Verdict::Held { action, by };
+    let ff = act(SyncAction::FastForward { commits: 1 });
+    // `dev` isn't the registry's branch: never rebased, so never held
+    let dev = needs(BranchNeedsHuman::Diverged);
+    for (scan, by) in [
+        (LfsScan::Pointers, BranchHold::LfsObjects),
+        (LfsScan::TooLarge, BranchHold::LfsUnscanned),
+    ] {
+        assert_eq!(
+            verdicts(&e, &with(scan)),
+            named(&[
+                ("main", held(push, by)),
+                ("feat", ff.clone()),
+                ("dev", dev.clone()),
+            ]),
+            "{scan:?}"
+        );
+    }
+    for scan in [LfsScan::Clean, LfsScan::Skipped] {
+        assert_eq!(verdicts(&e, &with(scan))[0].1, act(push), "{scan:?}");
+    }
+
+    // the registry's branch, diverged: its rebase is held
+    let rebasing = |scan| {
+        let mut f = facts(
+            on("main"),
+            &[b("main", O, true, diverged).unique(1).lfs(scan)],
+        );
+        f.branches[0].branch.worktree = Some("/ws/app".into());
+        f
+    };
+    assert_eq!(
+        verdicts(&e, &rebasing(LfsScan::Pointers))[0].1,
+        held(rebase, BranchHold::LfsObjects)
+    );
+    assert_eq!(
+        verdicts(&e, &rebasing(LfsScan::TooLarge))[0].1,
+        held(rebase, BranchHold::LfsUnscanned)
+    );
+    assert_eq!(verdicts(&e, &rebasing(LfsScan::Clean))[0].1, act(rebase));
+
+    // every other hold names itself first
+    let main = |f: &RepoFacts, sessions: &EntrySessions| verdicts_with(&e, f, sessions).remove(0);
+    let idle = EntrySessions::idle();
+    let mut f = with(LfsScan::Pointers);
+    f.push_urls = Some(vec!["git@github.com:me/other".into()]);
+    assert_eq!(main(&f, &idle), held(push, BranchHold::PushUrl));
+    let mut f = with(LfsScan::Pointers);
+    f.fetch_failed = true;
+    assert_eq!(main(&f, &idle), held(push, BranchHold::FetchFailed));
+    let f = with(LfsScan::Pointers);
+    assert_eq!(
+        main(&f, &busy_at(&["/ws/app"])),
+        held(push, BranchHold::Busy)
+    );
+    let unavailable = EntrySessions {
+        detection: Detection::Unavailable,
+        ..EntrySessions::idle()
+    };
+    assert_eq!(main(&f, &unavailable), held(push, BranchHold::BusyUnknown));
+    let mut f = rebasing(LfsScan::Pointers);
+    f.status.uncommitted.untracked = 1;
+    assert_eq!(main(&f, &idle), held(rebase, BranchHold::DirtyCheckout));
+    // a pin's pushes are never its to make
+    let pinned = owned(Mode::PinnedOn("main"));
+    assert_eq!(
+        verdicts(&pinned, &with(LfsScan::Pointers))[0].1,
+        Verdict::LocalOnly
     );
 }

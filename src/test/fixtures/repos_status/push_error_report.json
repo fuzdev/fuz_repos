@@ -1,5 +1,5 @@
 {
-	"version": 11,
+	"version": 12,
 	"error": {
 		"kind": "push_third_party",
 		"key": "typescript",

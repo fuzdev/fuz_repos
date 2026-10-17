@@ -128,6 +128,8 @@ pub(super) const fn hold_note(by: BranchSyncHold) -> &'static str {
         BranchSyncHold::SeveralCheckouts => " (several checkouts)",
         BranchSyncHold::Busy => " (busy)",
         BranchSyncHold::BusyUnknown => " (busy unknown)",
+        BranchSyncHold::LfsObjects => " (Git LFS objects)",
+        BranchSyncHold::LfsUnscanned => " (Git LFS unscanned)",
         BranchSyncHold::Changed => " (changed since read, rerun)",
     }
 }

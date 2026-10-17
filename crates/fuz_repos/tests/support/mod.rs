@@ -911,6 +911,17 @@ impl FixtureWorkspace {
     /// `cwd`), `--new-branch` under `new_branch`, run by a person; as a
     /// `PushRun`, the report's parts.
     pub fn push_report(&self, targets: &[&str], cwd: &Path, new_branch: bool) -> PushRun {
+        self.push_report_lfs(targets, cwd, new_branch, false)
+    }
+
+    /// `push_report`, `--lfs-uploaded` under `lfs_uploaded`.
+    pub fn push_report_lfs(
+        &self,
+        targets: &[&str],
+        cwd: &Path,
+        new_branch: bool,
+        lfs_uploaded: bool,
+    ) -> PushRun {
         self.write_registry();
         let targets: Vec<String> = targets.iter().map(|&t| t.to_owned()).collect();
         let reported = push_report(
@@ -920,6 +931,7 @@ impl FixtureWorkspace {
             &targets,
             PushReportOptions {
                 new_branch,
+                lfs_uploaded,
                 caller: Caller::Person,
                 jobs: 4,
                 sessions: &no_sessions(),
@@ -950,6 +962,11 @@ impl FixtureWorkspace {
     /// `repos push --new-branch` of `targets` from the workspace root.
     pub fn push_new_branch(&self, targets: &[&str]) -> PushRun {
         self.push_report(targets, &self.root(), true)
+    }
+
+    /// `repos push --lfs-uploaded` of `targets` from the workspace root.
+    pub fn push_lfs_uploaded(&self, targets: &[&str]) -> PushRun {
+        self.push_report_lfs(targets, &self.root(), false, true)
     }
 
     /// `push` of `targets`, resolved from `cwd` as the binary resolves them
@@ -989,6 +1006,7 @@ impl FixtureWorkspace {
                 visibility_base: Some(&self.visibility_base()),
                 read_live,
                 new_branch,
+                lfs_uploaded: false,
             },
         )
     }

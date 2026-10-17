@@ -42,7 +42,7 @@ import { meta } from '@fuzdev/fuz_schema/meta.ts';
  * The `repos status --json` document's format version, Rust's
  * `STATUS_FORMAT_VERSION`: the one these schemas parse.
  */
-export const REPOS_STATUS_FORMAT_VERSION = 19;
+export const REPOS_STATUS_FORMAT_VERSION = 20;
 
 // u32 and u64 on the Rust side
 const Count = s.pipe(s.number, s.safe_integer, s.min_value(0));
@@ -140,7 +140,9 @@ export const ReposBranchHold = s.one_of([
 	'unprobed_worktree',
 	'several_checkouts',
 	'busy',
-	'busy_unknown'
+	'busy_unknown',
+	'lfs_objects',
+	'lfs_unscanned'
 ]);
 export type ReposBranchHold = s.Infer<typeof ReposBranchHold>;
 

@@ -111,6 +111,9 @@ struct PushGroups {
     in_sync: Vec<String>,
     held: Vec<String>,
     not_pushed: Vec<String>,
+    /// The branches held for Git LFS by entry key and branch name, each
+    /// pair once (`lfs_hint`).
+    lfs_held: Vec<(String, String)>,
     /// The branch hints called for, as many times as branches call for
     /// them: each prints once, after its group — in the group's order for
     /// the groups with several (`PUSH_NEEDS_HUMAN_HINTS`,
@@ -217,6 +220,12 @@ impl PushGroups {
                 if *by == BranchSyncHold::DirtyCheckout {
                     self.hints.push(PushHint::DirtyRebase);
                 }
+                if is_lfs_hold(*by) {
+                    let held = (p.key.clone(), p.branch.clone().unwrap_or_default());
+                    if !self.lfs_held.contains(&held) {
+                        self.lfs_held.push(held);
+                    }
+                }
                 self.held
                     .push(format!("{label}{standing}{}", hold_note(*by)));
             }
@@ -296,6 +305,14 @@ impl PushGroups {
         if self.hints.contains(&PushHint::DirtyRebase) {
             line("", Tone::Plain, hint(PushHint::DirtyRebase.text()));
         }
+        if !self.lfs_held.is_empty() {
+            let held: Vec<(&str, &str)> = self
+                .lfs_held
+                .iter()
+                .map(|(key, name)| (key.as_str(), name.as_str()))
+                .collect();
+            line("", Tone::Plain, hint(&lfs_hint(&held)));
+        }
         line("not pushed", Tone::Yellow, self.not_pushed);
         for branch_hint in PUSH_NOT_PUSHED_HINTS {
             if self.hints.contains(&branch_hint) {
@@ -332,6 +349,41 @@ fn push_remote_hints(report: &PushReport) -> Vec<&'static str> {
         hints.push(AUTH_HINT);
     }
     hints
+}
+
+/// Whether a hold is Git LFS's (`lfs_hint`).
+const fn is_lfs_hold(by: BranchSyncHold) -> bool {
+    matches!(
+        by,
+        BranchSyncHold::LfsObjects | BranchSyncHold::LfsUnscanned
+    )
+}
+
+/// The branches held for Git LFS by entry key and branch name, each pair
+/// once: by their verdict, or by what sync did with them (`synced`).
+fn held_for_lfs<'r>(
+    report: &'r StatusReport,
+    synced: Option<&'r [EntrySync]>,
+) -> Vec<(&'r str, &'r str)> {
+    let verdicts = report.entries.iter().flat_map(|e| {
+        e.branches
+            .iter()
+            .filter(|b| matches!(&b.verdict, Verdict::Held { by, .. } if is_lfs_hold((*by).into())))
+            .map(|b| (e.key.as_str(), b.name.as_str()))
+    });
+    let outcomes = synced.into_iter().flatten().flat_map(|e| {
+        e.branches
+            .iter()
+            .filter(|b| matches!(&b.outcome, BranchOutcome::Held { by, .. } if is_lfs_hold(*by)))
+            .map(|b| (e.key.as_str(), b.name.as_str()))
+    });
+    let mut held: Vec<(&str, &str)> = Vec::new();
+    for pair in verdicts.chain(outcomes) {
+        if !held.contains(&pair) {
+            held.push(pair);
+        }
+    }
+    held
 }
 
 /// Why a push target's checkout wasn't read.
@@ -429,6 +481,10 @@ fn summary(
     };
     line(act_label, Tone::Green, Items::Runs(g.act.verbs(), " · "));
     line("held", Tone::Yellow, Items::Runs(g.held.verbs(), " · "));
+    let lfs_held = held_for_lfs(report, synced);
+    if !lfs_held.is_empty() {
+        line("", Tone::Plain, hint(lfs_hint(&lfs_held)));
+    }
     line("local-only", Tone::Plain, Items::Singles(g.local_only));
     line("uncommitted", Tone::Plain, Items::Singles(g.uncommitted));
     line("cleanup", Tone::Plain, Items::Singles(g.cleanup));

@@ -654,6 +654,8 @@ pub enum BranchSyncHold {
     /// A live session may work there unseen — as classified, or found so
     /// right before acting (busy detection unavailable, among them).
     BusyUnknown,
+    LfsObjects,
+    LfsUnscanned,
     /// Found at the moment of acting: the branch or its checkout isn't as
     /// the probe read it — the checkout's HEAD left the branch, a shallow
     /// branch gained commits on no remote, a branch to move in place is
@@ -681,6 +683,8 @@ impl From<BranchHold> for BranchSyncHold {
             BranchHold::SeveralCheckouts => Self::SeveralCheckouts,
             BranchHold::Busy => Self::Busy,
             BranchHold::BusyUnknown => Self::BusyUnknown,
+            BranchHold::LfsObjects => Self::LfsObjects,
+            BranchHold::LfsUnscanned => Self::LfsUnscanned,
         }
     }
 }

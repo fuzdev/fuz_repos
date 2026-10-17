@@ -172,9 +172,11 @@ fn the_index_is_read_only_for_a_worktree_on_a_gone_branch() {
     );
     let e = &run.entries[0];
     // rev-parse, config, the fetch URL, status, for-each-ref; rev-list for
-    // `fresh` and `old` (they could carry local work); the worktree list and
-    // three statuses; and one `ls-files`, for the worktree on `old`
-    assert_eq!(git.spawns(), 5 + 2 + 1 + 3 + 1);
+    // `fresh` and `old` (they could carry local work), and a Git LFS scan of
+    // each (`rev-list --objects`, finding no blob past origin's refs, so no
+    // `cat-file`); the worktree list and three statuses; and one
+    // `ls-files`, for the worktree on `old`
+    assert_eq!(git.spawns(), 5 + 2 + 2 + 1 + 3 + 1);
     let submodules = |b: &str| {
         e.checkouts
             .iter()

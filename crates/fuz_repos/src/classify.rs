@@ -12,6 +12,7 @@ use serde::Serialize;
 
 use crate::busy::{Detection, EntrySessions};
 use crate::gitdir::is_valid_refname;
+use crate::lfs::LfsScan;
 use crate::porcelain::{BranchConfig, ConfigFacts, OriginKeys, OriginUrl, RefFacts, Track};
 use crate::probe::{BranchFacts, RepoFacts};
 use crate::registry::{Entry, RepoUrl};
@@ -527,6 +528,7 @@ pub(crate) fn classify(
                 entry: entry_held,
                 push_url,
                 fetch_failed: facts.fetch_failed,
+                lfs: b.lfs,
                 on: &on,
                 detection: sessions.detection,
             };
@@ -810,6 +812,8 @@ struct Holds<'a, 'b> {
     push_url: bool,
     /// The run's fetch of the entry failed or was refused.
     fetch_failed: bool,
+    /// What the branch's push would send holds of Git LFS pointers.
+    lfs: LfsScan,
     on: &'b CheckoutsOn<'a>,
     detection: Detection,
 }
@@ -824,9 +828,12 @@ impl Holds<'_, '_> {
     /// in doubt, or one on the branch whose path can't be resolved or that
     /// the probe didn't find, or an unlisted git dir a session works through
     /// — holds every action; and a push URL other than the registry's holds
-    /// a push, and a rebase, which ends in one. A pin names the hold before
-    /// anything else, since clearing the rest never releases it; otherwise
-    /// the most specific reason names it.
+    /// a push, and a rebase, which ends in one, as do Git LFS pointers among
+    /// what it would send, or a range too large to read for them. A pin
+    /// names the hold before anything else, since clearing the rest never
+    /// releases it; Git LFS's after everything else, since `repos push
+    /// --lfs-uploaded` lifts it, and only it; otherwise the most specific
+    /// reason names it.
     fn of(&self, action: SyncAction) -> Option<BranchHold> {
         let push = matches!(action, SyncAction::Push { .. });
         let pushes = push || matches!(action, SyncAction::Rebase { .. });
@@ -848,6 +855,10 @@ impl Holds<'_, '_> {
             Some(BranchHold::SeveralCheckouts)
         } else if self.on.maybe_busy || self.detection == Detection::Unavailable {
             Some(BranchHold::BusyUnknown)
+        } else if pushes && self.lfs == LfsScan::Pointers {
+            Some(BranchHold::LfsObjects)
+        } else if pushes && self.lfs == LfsScan::TooLarge {
+            Some(BranchHold::LfsUnscanned)
         } else {
             None
         }

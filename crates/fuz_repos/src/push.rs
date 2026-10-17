@@ -72,6 +72,17 @@
 //! without the flag. An agent is refused it before anything runs
 //! (`check_new_branch`).
 //!
+//! **Git LFS pointers hold it.** The tool runs no hook, so Git LFS's own
+//! upload before a push never runs: a branch whose push — a rebase's, or a
+//! creation's — would send a Git LFS pointer origin doesn't hold yet (the
+//! `lfs` module says how that's read) is held (`lfs_objects`), and so is one
+//! whose range is too large to read for them (`lfs_unscanned`). Once the
+//! objects are uploaded (`git lfs push origin <branch>`), `--lfs-uploaded`
+//! lifts that hold alone: classify names it after every other, so a branch
+//! it holds has no other. Anyone may pass it, an agent included: it's the
+//! caller's word, and a host that checks the objects (GitHub) still refuses
+//! a push whose objects aren't there; one that doesn't takes it.
+//!
 //! **An agent may run it** without `--new-branch`: its push, and the
 //! rebase before it, is classified and made as a person's. It's the path
 //! agents push by: the user's Claude Code settings deny them raw `git
@@ -85,6 +96,7 @@ use crate::classify::{NeedsHuman, Refresh};
 use crate::discover::{Locate, PathTarget, Workspace, resolve_push_targets};
 use crate::error::{Error, Result};
 use crate::git::Git;
+use crate::lfs::LfsScan;
 use crate::probe::RepoFacts;
 use crate::registry::{Entry, RegistryDirs};
 use crate::report::{
@@ -92,7 +104,9 @@ use crate::report::{
     PushReport, Sessions,
 };
 use crate::sessions::{Caller, LiveSessions, SessionsSource, read_live_sessions};
-use crate::state::{BranchNeedsHuman, BranchStatus, Head, Relation, SyncAction, Verdict};
+use crate::state::{
+    BranchHold, BranchNeedsHuman, BranchStatus, Head, Relation, SyncAction, Verdict,
+};
 use crate::status::{EntryTiming, Reported, RunTimings, Survey, assemble_report, probe_and_assess};
 use crate::sync::{Actor, NewBranchUpstream, PushDone, RebasedPush, Stop, fetch_outcome};
 
@@ -112,6 +126,10 @@ pub struct PushOptions<'a> {
     /// `push_report` refuses it to an agent; `push` itself doesn't ask who
     /// runs it.
     pub new_branch: bool,
+    /// `--lfs-uploaded`: push a branch held only for the Git LFS pointers
+    /// it would send (`lfs_objects`, `lfs_unscanned`), the caller saying
+    /// their objects are on the host already (`lfs_hold`).
+    pub lfs_uploaded: bool,
 }
 
 impl std::fmt::Debug for PushOptions<'_> {
@@ -120,6 +138,7 @@ impl std::fmt::Debug for PushOptions<'_> {
             .field("jobs", &self.jobs)
             .field("visibility_base", &self.visibility_base)
             .field("new_branch", &self.new_branch)
+            .field("lfs_uploaded", &self.lfs_uploaded)
             .finish_non_exhaustive()
     }
 }
@@ -146,6 +165,8 @@ pub struct PushRun {
 pub struct PushReportOptions<'a> {
     /// `--new-branch` (`PushOptions::new_branch`), refused to an agent.
     pub new_branch: bool,
+    /// `--lfs-uploaded` (`PushOptions::lfs_uploaded`).
+    pub lfs_uploaded: bool,
     /// Who runs it (`Caller::from_env`): `new_branch` is the user's alone.
     pub caller: Caller,
     /// Entries fetched at once, at least one.
@@ -199,6 +220,7 @@ pub fn push_report(
             visibility_base: None,
             read_live: &read_live,
             new_branch: opts.new_branch,
+            lfs_uploaded: opts.lfs_uploaded,
         },
     );
     let status = assemble_report(&ws, true, run.sessions, run.entries, None);
@@ -317,6 +339,7 @@ pub fn push(
                     fetch: &fetch,
                     checkout: &t.checkout,
                     new_branch: opts.new_branch,
+                    lfs_uploaded: opts.lfs_uploaded,
                 },
                 &mut done,
             );
@@ -340,8 +363,9 @@ pub fn push(
 }
 
 /// One target, as `target_outcome` reads it: entry `i`'s facts and status
-/// after the fetch, how its `fetch` went, the `checkout` named, and whether
-/// the run creates a branch with no upstream on origin (`new_branch`).
+/// after the fetch, how its `fetch` went, the `checkout` named, whether
+/// the run creates a branch with no upstream on origin (`new_branch`), and
+/// whether it lifts the Git LFS hold (`lfs_uploaded`).
 struct Target<'a> {
     i: usize,
     facts: Option<&'a RepoFacts>,
@@ -349,6 +373,7 @@ struct Target<'a> {
     fetch: &'a FetchOutcome,
     checkout: &'a Path,
     new_branch: bool,
+    lfs_uploaded: bool,
 }
 
 /// The branch checked out at the target's checkout, and what pushing it
@@ -409,10 +434,11 @@ fn target_outcome(
             },
         );
     }
+    let verdict = lifted(&b.verdict, t.lfs_uploaded);
     if let Verdict::Held {
         action: SyncAction::Push { .. } | SyncAction::Rebase { .. },
         by,
-    } = &b.verdict
+    } = &verdict
     {
         return (branch, PushOutcome::Held { by: (*by).into() });
     }
@@ -437,6 +463,9 @@ fn target_outcome(
             PushOutcome::NeedsHuman {
                 reason: BranchNeedsHuman::ArchivedAhead,
             }
+        } else if let Some(by) = lfs_hold(facts, &b.name, t.lfs_uploaded) {
+            // what classify holds a push for, a creation sends too
+            PushOutcome::Held { by }
         } else {
             done.entry((facts.repo_key.clone(), name.clone()))
                 .or_insert_with(|| actor.create(t.i, facts, b, upstream))
@@ -444,7 +473,7 @@ fn target_outcome(
         };
         return (branch, outcome);
     }
-    let outcome = match &b.verdict {
+    let outcome = match &verdict {
         Verdict::Act {
             action: SyncAction::Push { commits },
         } => done
@@ -478,6 +507,36 @@ fn target_outcome(
         }
     };
     (branch, outcome)
+}
+
+/// `verdict`, or under `--lfs-uploaded` (`lfs_uploaded`) its action, when
+/// Git LFS's pointers are all that hold it: classify names that hold after
+/// every other (`BranchHold::LfsObjects`), so a branch it names has no
+/// other, and acts as though it never had one.
+fn lifted(verdict: &Verdict, lfs_uploaded: bool) -> Verdict {
+    match verdict {
+        Verdict::Held {
+            action,
+            by: BranchHold::LfsObjects | BranchHold::LfsUnscanned,
+        } if lfs_uploaded => Verdict::Act { action: *action },
+        verdict => verdict.clone(),
+    }
+}
+
+/// What holds `--new-branch`'s creation of branch `name` for the Git LFS
+/// pointers it would send, as classify holds a push (`BranchFacts::lfs`):
+/// `None` when it sends none, or under `--lfs-uploaded` (`lfs_uploaded`).
+fn lfs_hold(facts: &RepoFacts, name: &str, lfs_uploaded: bool) -> Option<BranchSyncHold> {
+    if lfs_uploaded {
+        return None;
+    }
+    match facts.branches.iter().find(|f| f.branch.name == name)?.lfs {
+        LfsScan::Pointers => Some(BranchSyncHold::LfsObjects),
+        // never read only for a branch no push sends (the probe reads every
+        // one `creatable` names): held unread, should that change
+        LfsScan::TooLarge | LfsScan::Skipped => Some(BranchSyncHold::LfsUnscanned),
+        LfsScan::Clean => None,
+    }
 }
 
 /// Whether `--new-branch` creates branch `b` on origin, by the upstream it
@@ -565,5 +624,89 @@ fn rebased(result: std::result::Result<RebasedPush, String>) -> PushOutcome {
         Ok(RebasedPush::Held(by)) => PushOutcome::Held { by },
         Ok(RebasedPush::Refused(why)) => PushOutcome::RebaseRefused { why },
         Err(message) => PushOutcome::Failed { message },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::porcelain::{ConfigFacts, RefFacts, Track};
+    use crate::probe::{BranchFacts, test_facts};
+
+    /// `app` with one branch, `topic`, its push's Git LFS scan `lfs`.
+    fn facts(lfs: LfsScan) -> RepoFacts {
+        let topic = BranchFacts {
+            branch: RefFacts {
+                name: "topic".into(),
+                oid: "c-topic".into(),
+                symref: None,
+                upstream_ref: None,
+                merge_ref: None,
+                track: Track::Even,
+                worktree: None,
+                committer_time: 0,
+            },
+            unique_commits: 1,
+            on_fetched_tip: false,
+            local_merges: 0,
+            local_tagged: false,
+            lfs,
+        };
+        let head = Head::Branch {
+            name: "topic".into(),
+        };
+        test_facts(head, ConfigFacts::default(), vec![topic])
+    }
+
+    /// A creation is held as classify holds a push: for pointers, and for a
+    /// range not read — too large, or never read at all — unless the upload
+    /// is said.
+    #[test]
+    fn a_creation_is_held_for_git_lfs_unless_the_upload_is_said() {
+        let hold = |lfs, uploaded| lfs_hold(&facts(lfs), "topic", uploaded);
+        assert_eq!(
+            hold(LfsScan::Pointers, false),
+            Some(BranchSyncHold::LfsObjects)
+        );
+        assert_eq!(
+            hold(LfsScan::TooLarge, false),
+            Some(BranchSyncHold::LfsUnscanned)
+        );
+        assert_eq!(
+            hold(LfsScan::Skipped, false),
+            Some(BranchSyncHold::LfsUnscanned)
+        );
+        assert_eq!(hold(LfsScan::Clean, false), None);
+        for lfs in [LfsScan::Pointers, LfsScan::TooLarge, LfsScan::Skipped] {
+            assert_eq!(hold(lfs, true), None, "{lfs:?}");
+        }
+    }
+
+    /// `--lfs-uploaded` lifts Git LFS's holds and no other.
+    #[test]
+    fn the_flag_lifts_git_lfs_holds_alone() {
+        let push = SyncAction::Push { commits: 1 };
+        let held = |by| Verdict::Held { action: push, by };
+        for by in [BranchHold::LfsObjects, BranchHold::LfsUnscanned] {
+            assert_eq!(lifted(&held(by), true), Verdict::Act { action: push });
+            assert_eq!(lifted(&held(by), false), held(by));
+        }
+        for by in [
+            BranchHold::Pinned,
+            BranchHold::Entry,
+            BranchHold::PushUrl,
+            BranchHold::FetchFailed,
+            BranchHold::DirtyCheckout,
+            BranchHold::UnprobedWorktree,
+            BranchHold::SeveralCheckouts,
+            BranchHold::Busy,
+            BranchHold::BusyUnknown,
+        ] {
+            assert_eq!(lifted(&held(by), true), held(by), "{by:?}");
+        }
+        let needs = Verdict::NeedsHuman {
+            reason: BranchNeedsHuman::Diverged,
+        };
+        assert_eq!(lifted(&needs, true), needs);
     }
 }

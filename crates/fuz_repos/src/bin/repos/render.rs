@@ -187,6 +187,30 @@ const REBASED_HINT: &str = "a rebase replays the branch's commits onto origin's 
 const DIRTY_REBASE_HINT: &str = "a diverged branch is rebased before it's pushed, which needs a \
      clean checkout (untracked files count): commit, or git stash -u, then repos push again";
 
+/// A branch held for the Git LFS pointers its push would send, or a range
+/// too large to read for them: the upload is the user's tool's, and the
+/// flag says it ran. `held` names the held branches by entry key and branch
+/// name, each pair once (an empty name for a branch the report doesn't
+/// name): the command names the branch when exactly one is held, and
+/// otherwise leaves each repo's to a placeholder — two entries both on
+/// `main` are two uploads. A name starting with `-` is written as its ref,
+/// so `git lfs` can't read it as a flag.
+fn lfs_hint(held: &[(&str, &str)]) -> String {
+    let target = match held {
+        [(_, one)] if one.starts_with('-') => Some(Cow::Owned(format!("refs/heads/{one}"))),
+        [(_, one)] if !one.is_empty() => Some(Cow::Borrowed(*one)),
+        _ => None,
+    };
+    let command = target.map_or_else(
+        || "<branch> for each held branch, in its repo".to_owned(),
+        |target| shell_quote(&target).into_owned(),
+    );
+    format!(
+        "repos runs no hook, so Git LFS uploads nothing on its push: run git lfs push origin \
+         {command}, then repos push --lfs-uploaded where it's checked out"
+    )
+}
+
 /// A branch with no upstream on origin that `--new-branch` would create:
 /// none set, or a same-named one gone. The user's, never an agent's.
 const NEW_BRANCH_HINT: &str =

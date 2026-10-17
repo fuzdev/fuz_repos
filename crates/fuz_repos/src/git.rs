@@ -31,7 +31,7 @@
 //! checkout, which needs the new tip's blobs (`CallOptions::lazy_fetch`).
 
 use std::ffi::OsString;
-use std::io::{self, Read};
+use std::io::{self, Read, Write};
 use std::path::Path;
 use std::process::{Child, Command, ExitStatus, Stdio};
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -213,6 +213,10 @@ pub(crate) struct CallOptions<'a> {
     /// option). For the values a `--config-env` names, which git reads
     /// whole, `=` and all, where `-c` splits its argument at the first `=`.
     pub env: &'a [(&'a str, &'a str)],
+    /// What git reads on its stdin, written whole and then closed, for a
+    /// call that takes its input there (`cat-file --batch`); `None` gives it
+    /// none (`/dev/null`).
+    pub stdin: Option<&'a [u8]>,
 }
 
 /// Options for a call that reaches a remote.
@@ -299,7 +303,7 @@ impl Git {
         opts: CallOptions<'_>,
     ) -> Result<GitOutput, GitError> {
         let (cmd, timeout) = self.command(dir, args, opts);
-        self.spawn_wait(cmd, timeout, || args.join(" "))
+        self.spawn_wait(cmd, timeout, opts.stdin, || args.join(" "))
     }
 
     /// Reads `url`'s `HEAD` with `git ls-remote`, anonymously: success means
@@ -330,7 +334,7 @@ impl Git {
     pub(crate) fn ls_remote_anonymous(&self, dir: &Path, url: &str) -> Result<(), GitError> {
         let args = anonymous_args(url);
         let (cmd, timeout) = self.anonymous_command(dir, url)?;
-        let out = self.spawn_wait(cmd, timeout, || args.join(" "))?;
+        let out = self.spawn_wait(cmd, timeout, None, || args.join(" "))?;
         if out.status.success() {
             Ok(())
         } else {
@@ -362,6 +366,7 @@ impl Git {
                 timeout: None,
                 lazy_fetch: false,
                 env: &[],
+                stdin: None,
             },
         );
         let allowed = match self.env_var("GIT_ALLOW_PROTOCOL") {
@@ -411,7 +416,11 @@ impl Git {
         .env("LC_ALL", "C")
         .env("GIT_OPTIONAL_LOCKS", "0")
         .env("GIT_NO_LAZY_FETCH", if opts.lazy_fetch { "0" } else { "1" })
-        .stdin(Stdio::null())
+        .stdin(if opts.stdin.is_some() {
+            Stdio::piped()
+        } else {
+            Stdio::null()
+        })
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
         for var in SCRUBBED_ENV {
@@ -436,14 +445,17 @@ impl Git {
         (cmd, timeout)
     }
 
-    /// Spawns `cmd` and waits for it under `timeout`, counting the spawn.
+    /// Spawns `cmd`, writes `input` to its stdin on a thread of its own (so
+    /// a git that fills its stdout before reading all of it can't block the
+    /// write), and waits for it under `timeout`, counting the spawn.
     fn spawn_wait(
         &self,
         mut cmd: Command,
         timeout: Duration,
+        input: Option<&[u8]>,
         args: impl Fn() -> String,
     ) -> Result<GitOutput, GitError> {
-        let child = cmd.spawn().map_err(|e| {
+        let mut child = cmd.spawn().map_err(|e| {
             if e.kind() == io::ErrorKind::NotFound {
                 GitError::NotFound
             } else {
@@ -451,6 +463,14 @@ impl Git {
             }
         })?;
         self.spawns.fetch_add(1, Ordering::Relaxed);
+        if let (Some(input), Some(mut stdin)) = (input, child.stdin.take()) {
+            let input = input.to_vec();
+            // a git that exits without reading it all fails the write: its
+            // exit status says what happened
+            thread::spawn(move || {
+                let _ = stdin.write_all(&input);
+            });
+        }
         wait_capped(child, timeout, args)
     }
 
@@ -981,6 +1001,31 @@ mod tests {
         }
         // refused before anything ran
         assert_eq!(git.spawns(), 0);
+    }
+
+    /// A call's input reaches git's stdin whole, and one without any reads
+    /// none.
+    #[test]
+    fn a_calls_input_is_its_stdin() {
+        let git = Git::new();
+        let tmp = tempfile::tempdir().unwrap();
+        let hash = |stdin| {
+            let opts = CallOptions {
+                stdin,
+                ..CallOptions::default()
+            };
+            git.output_string(tmp.path(), &["hash-object", "--stdin"], opts)
+                .unwrap()
+        };
+        // `git hash-object` of `hello\n`, and of nothing
+        assert_eq!(
+            hash(Some(b"hello\n".as_slice())).trim(),
+            "ce013625030ba8dba906f756967f9e9ca394464a"
+        );
+        assert_eq!(
+            hash(None).trim(),
+            "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391"
+        );
     }
 
     #[test]

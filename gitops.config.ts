@@ -10,7 +10,6 @@ const config: GitopsConfig = {
 		'fuz_util',
 		'fuz_template',
 		'fuz_blog',
-		'fuz_mastodon',
 		'fuz_code',
 		'mdz',
 		'svelte-docinfo',

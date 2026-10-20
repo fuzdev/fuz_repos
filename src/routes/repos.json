@@ -258184,7 +258184,7 @@
 		"library_json": {
 			"pkg_json": {
 				"name": "@fuzdev/fuz_repos",
-				"version": "0.87.0",
+				"version": "0.88.0",
 				"description": "a tool for managing many repos",
 				"glyph": "🪄",
 				"logo": "logo.svg",
@@ -270178,7 +270178,7 @@
 		},
 		"package_json": {
 			"name": "@fuzdev/fuz_repos",
-			"version": "0.87.0",
+			"version": "0.88.0",
 			"description": "a tool for managing many repos",
 			"glyph": "🪄",
 			"logo": "logo.svg",
@@ -270225,7 +270225,7 @@
 				"@fuzdev/fuz_code": "^0.54.0",
 				"@fuzdev/fuz_css": "^0.70.0",
 				"@fuzdev/fuz_schema": "^0.5.0",
-				"@fuzdev/fuz_ui": "^0.217.0",
+				"@fuzdev/fuz_ui": "^0.218.0",
 				"@fuzdev/fuz_util": "^0.77.0",
 				"@fuzdev/gro": "^0.220.0",
 				"@fuzdev/mdz": "^0.6.0",

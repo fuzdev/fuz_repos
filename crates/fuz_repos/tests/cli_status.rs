@@ -319,7 +319,7 @@ fn piped_output_is_never_colored() {
 }
 
 #[test]
-fn the_summary_wraps_at_columns() {
+fn the_summary_ignores_columns() {
     let mut ws = workspace();
     ws.declare_repo("other", "other", "");
     ws.write_registry();
@@ -333,17 +333,14 @@ fn the_summary_wraps_at_columns() {
         assert_eq!(out.status.code(), Some(0), "stderr: {}", stderr(&out));
         stdout(&out)
     };
-    let one_line = "sync would    push app +1 · clone gone, other\n";
-    // unset, unusable, or too narrow: 100
-    for columns in [None, Some("wide"), Some("39")] {
-        let text = status(columns);
-        assert!(text.starts_with(one_line), "{columns:?}: {text}");
+    // one item to a line, whatever the terminal's width
+    let vertical =
+        "sync would    push app +1\n              clone gone\n                    other\n";
+    let unset = status(None);
+    assert!(unset.starts_with(vertical), "{unset}");
+    for columns in ["wide", "40", "400"] {
+        assert_eq!(status(Some(columns)), unset, "COLUMNS={columns}");
     }
-    let text = status(Some("40"));
-    assert!(
-        text.starts_with("sync would    push app +1\n              clone gone, other\n"),
-        "{text}"
-    );
 }
 
 #[test]

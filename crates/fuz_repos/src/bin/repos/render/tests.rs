@@ -192,7 +192,6 @@ const NOW: u64 = 1_800_000_000;
 const VIEW: View<'static> = View {
     home: Some("/home/me"),
     now: NOW,
-    width: DEFAULT_WIDTH,
     color: false,
 };
 
@@ -355,7 +354,9 @@ fn pushes_read_as_what_the_push_did() {
             "pushed        app +2",
             "in sync       uz",
             "held          blog:feat +1 (busy)",
-            "not pushed    site (behind 3)  gro:topic (no upstream on origin)  mdz (detached HEAD)",
+            "not pushed    site (behind 3)",
+            "              gro:topic (no upstream on origin)",
+            "              mdz (detached HEAD)",
             "              gone (missing)",
             format!("              hint: {BEHIND_HINT}").as_str(),
             format!("              hint: {NEW_BRANCH_HINT}").as_str(),
@@ -442,14 +443,15 @@ fn new_branches_read_as_what_the_push_did() {
     assert_eq!(
         lines,
         [
-            "needs human   blog:topic (on origin already, at 0123456)  site:topic (outside \
-             refspec)",
+            "needs human   blog:topic (on origin already, at 0123456)",
+            "              site:topic (outside refspec)",
             format!("              hint: {UNMAPPED_HINT}").as_str(),
             format!("              hint: {EXISTS_HINT}").as_str(),
             "pushed        app:topic (new branch)",
-            "not pushed    zap:topic (no upstream on origin)  gro:feat (upstream gone from \
-             origin)",
-            "              mdz:fork (tracks upstream/fork)  uz:feat (upstream gone from origin)",
+            "not pushed    zap:topic (no upstream on origin)",
+            "              gro:feat (upstream gone from origin)",
+            "              mdz:fork (tracks upstream/fork)",
+            "              uz:feat (upstream gone from origin)",
             "              tsv:done (nothing unique, upstream gone from origin)",
             format!("              hint: {NEW_BRANCH_HINT}").as_str(),
             format!("              hint: {MERGED_HINT}").as_str(),
@@ -605,25 +607,25 @@ fn a_rebase_reads_as_what_moved_and_how_its_push_went() {
     );
     // a rebase held, refused, or unpushed leaves the branch off its upstream
     assert!(!pushed.in_sync());
-    let wide = View { width: 400, ..VIEW };
-    let text = render_push_summary(&pushed, wide);
+    let text = render_push_summary(&pushed, VIEW);
     let lines: Vec<&str> = text.lines().collect();
     assert_eq!(
         lines,
         [
-            "failed        site (push: rejected (pre-receive hook declined))  uz (rebase: fatal: \
-             no email was given and auto-detection is disabled)",
-            "needs human   zap (diverged +1 −1, rebase conflicts)  gro (diverged +2 −1, 4444444 is \
-             already upstream)",
+            "failed        site (push: rejected (pre-receive hook declined))",
+            "              uz (rebase: fatal: no email was given and auto-detection is disabled)",
+            "needs human   zap (diverged +1 −1, rebase conflicts)",
+            "              gro (diverged +2 −1, 4444444 is already upstream)",
             format!("              hint: {DIVERGED_HINT}").as_str(),
-            "rebased       app +2 (onto 1 new upstream commit, now bbbbbbb, was aaaaaaa)  blog +1 \
-             (onto 3 new upstream commits, now bbbbbbb, was aaaaaaa)  site +1 (onto 1 new \
-             upstream commit, now bbbbbbb, was aaaaaaa)  tsv +1 (onto 1 new upstream commit, now \
-             bbbbbbb, was aaaaaaa)",
+            "rebased       app +2 (onto 1 new upstream commit, now bbbbbbb, was aaaaaaa)",
+            "              blog +1 (onto 3 new upstream commits, now bbbbbbb, was aaaaaaa)",
+            "              site +1 (onto 1 new upstream commit, now bbbbbbb, was aaaaaaa)",
+            "              tsv +1 (onto 1 new upstream commit, now bbbbbbb, was aaaaaaa)",
             format!("              hint: {REBASED_HINT}").as_str(),
             "pushed        app +2",
             "in sync       tsv",
-            "held          blog +1 (changed since read, rerun)  mdz +1 −2 (dirty)",
+            "held          blog +1 (changed since read, rerun)",
+            "              mdz +1 −2 (dirty)",
             format!("              hint: {DIRTY_REBASE_HINT}").as_str(),
             "~/dev/repos.toml · fetched 3h ago",
         ],
@@ -633,7 +635,7 @@ fn a_rebase_reads_as_what_moved_and_how_its_push_went() {
     let landed = PushReport::new(pushed.status.clone(), vec![pushed.pushes[0].clone()]);
     assert!(landed.in_sync());
     assert_eq!(
-        render_push_summary(&landed, wide)
+        render_push_summary(&landed, VIEW)
             .lines()
             .collect::<Vec<_>>(),
         [
@@ -708,8 +710,8 @@ fn clones_read_as_what_sync_would_do_and_did() {
     let text = render_summary(&r, VIEW, false);
     assert!(
         text.starts_with(
-            "sync would    clone a, c, d, e\nheld          clone b (busy)\nclean 0 · \
-             on branches 0 · pinned 0"
+            "sync would    clone a\n                    c\n                    d\n                    e\n\
+             held          clone b (busy)\nclean 0 · on branches 0 · pinned 0"
         ),
         "{text}"
     );
@@ -767,7 +769,8 @@ fn clones_read_as_what_sync_would_do_and_did() {
             "              e (clone: cloned into /home/me/dev/e, but its HEAD is detached)",
             format!("              hint: {AUTH_HINT}").as_str(),
             "synced        clone a",
-            "held          clone b (busy), c (changed since read, rerun)",
+            "held          clone b (busy)",
+            "                    c (changed since read, rerun)",
         ],
         "{text}"
     );
@@ -883,8 +886,9 @@ fn a_refresh_reads_as_what_sync_would_do_and_did() {
     let text = render_summary(&r, VIEW, false);
     assert!(
         text.starts_with(
-            "sync would    refresh lib, dom, off · ff lib:main −3\nheld          refresh \
-             wpt (pinned)\nclean 0 · on branches 0 · pinned 0"
+            "sync would    refresh lib\n                      dom\n                      off\n\
+             \x20             ff lib:main −3\nheld          refresh wpt (pinned)\n\
+             clean 0 · on branches 0 · pinned 0"
         ),
         "{text}"
     );
@@ -947,7 +951,9 @@ fn a_refresh_reads_as_what_sync_would_do_and_did() {
         lines[..lines.len() - 1],
         [
             "failed        off (fetch: fatal: transport 'ssh' not allowed)",
-            "synced        refresh lib, dom · ff lib:main −3",
+            "synced        refresh lib",
+            "                      dom",
+            "              ff lib:main −3",
             "held          refresh wpt (pinned)",
         ],
         "{text}"
@@ -1148,12 +1154,18 @@ fn groups_by_what_to_do_next() {
 failed        wpt (fetch: origin has no fork)
               hint: a fetch refspec names a branch deleted or renamed on the remote, so nothing was \
              fetched — each entry's repair under --verbose
-needs human   uz:arc (diverged +2 −5)  old (archived, +1)  wpt (rebase in progress)
+needs human   uz:arc (diverged +2 −5)
+              old (archived, +1)
+              wpt (rebase in progress)
               wpt (outside refspec)
-sync would    push uz +13 · ff zzz −3 · clone blake3
-local-only    uz:wip (+1, 2d)  svelte:audit (+4, 2d, read-only)
+sync would    push uz +13
+              ff zzz −3
+              clone blake3
+local-only    uz:wip (+1, 2d)
+              svelte:audit (+4, 2d, read-only)
 uncommitted   uz (1)
-cleanup       uz:old (upstream gone, +1)  uz:done (merged)
+cleanup       uz:old (upstream gone, +1)
+              uz:done (merged)
 clean 1 · on branches 0 · pinned 0      ~/dev/repos.toml · fetched 3h ago, 1 never
 ";
     assert_eq!(out, want);
@@ -1274,9 +1286,12 @@ fn remote_failures_and_the_visibility_check() {
     let out = render_summary(&r, VIEW, false);
     let want = "\
 visibility    leaky (declared private, anonymously readable)
-failed        spec (fetch: origin has no refs/heads/feat)  dns (fetch: host not found)
-              conn (fetch: no connection)  key (fetch: host not trusted)
-              auth (fetch: access denied)  gone (fetch: repo not found)
+failed        spec (fetch: origin has no refs/heads/feat)
+              dns (fetch: host not found)
+              conn (fetch: no connection)
+              key (fetch: host not trusted)
+              auth (fetch: access denied)
+              gone (fetch: repo not found)
               slow (fetch: timed out after 120s)
               tagged (fetch: not run — refspec +refs/tags/*:refs/tags/* writes outside \
              refs/remotes/origin/)
@@ -1506,8 +1521,10 @@ fn origin_drift_shallow_moves_and_not_a_repo() {
     assert_eq!(
         render_summary(&r, VIEW, false),
         "\
-needs human   test262:work (shallow, tips differ, +2 local)  goblins (not a repo)
-origin drift  fuz_blog (ryanatkn/fuz_blog)  kit (https://codeberg.org/someone/kit)
+needs human   test262:work (shallow, tips differ, +2 local)
+              goblins (not a repo)
+origin drift  fuz_blog (ryanatkn/fuz_blog)
+              kit (https://codeberg.org/someone/kit)
               hint: git -C <dir> remote set-url origin <url> (each under --verbose)
 sync would    move test262:main
 held          push fuz_blog +2
@@ -1675,7 +1692,8 @@ clean 0 · on branches 0 · pinned 0      ~/dev/repos.toml · fetched 3h ago
         render_summary(&r, VIEW, true),
         "\
 held          push app +1 (busy)
-unscoped      pid 7 (~/dev)  pid 8 (/srv/x)
+unscoped      pid 7 (~/dev)
+              pid 8 (/srv/x)
 clean 0 · on branches 0 · pinned 0      ~/dev/repos.toml · fetched 3h ago
 "
     );
@@ -1940,7 +1958,8 @@ fn linked_worktrees_in_the_summary() {
         render_summary(&r, VIEW, false),
         "\
 failed        app (worktree ~/dev/app-broken: git status failed (128): fatal: not a git repository)
-held          ff app:feat −1 (dirty), app:usb −4 (unprobed worktree)
+held          ff app:feat −1 (dirty)
+                 app:usb −4 (unprobed worktree)
 uncommitted   app (clean; 2 worktrees, 4 more)
 cleanup       app:old (upstream gone, worktree ~/wt/app-old removable)
               app (worktree ~/dev/app-gone gone — if it moved, move it back (or to the workspace root) and rerun repos status, else git -C ~/dev/app worktree remove ~/dev/app-gone)
@@ -2001,8 +2020,10 @@ fn uncommitted_is_one_item_per_entry() {
             .take_while(|l| l.starts_with("uncommitted") || l.starts_with(' '))
             .collect::<Vec<_>>(),
         [
-            "uncommitted   solo (1,040)  one (worktree ~/dev/one-feat, 2)",
-            "              both (3; worktree ~/dev/both-feat, 5 more)  app (clean; 2 worktrees, 4 more)",
+            "uncommitted   solo (1,040)",
+            "              one (worktree ~/dev/one-feat, 2)",
+            "              both (3; worktree ~/dev/both-feat, 5 more)",
+            "              app (clean; 2 worktrees, 4 more)",
             "              big (12; 1,001 worktrees, 2,002 more)",
         ]
     );
@@ -2263,9 +2284,11 @@ fn unregistered_in_the_summary() {
     assert_eq!(
         render_summary(&r, VIEW, false),
         "\
-unregistered  owned: app-copy (shares app's git dir with ~/wt/app-feat — don't repair),
-              app-old (moved worktree of app — git worktree repair), mine
-              third-party: lib, lib-feat (worktree)
+unregistered  owned: app-copy (shares app's git dir with ~/wt/app-feat — don't repair)
+                     app-old (moved worktree of app — git worktree repair)
+                     mine
+              third-party: lib
+                           lib-feat (worktree)
               no origin: site-orphan (orphaned worktree of site — its git dir is lost)
 clean 1 · on branches 0 · pinned 0      ~/dev/repos.toml · fetched 3h ago
 "
@@ -2406,12 +2429,12 @@ fn a_moved_worktree_whose_repair_is_blocked() {
     assert_eq!(
         render_summary(&r, VIEW, false),
         "\
-unregistered  owned: app-feat (moved worktree of app — another moved worktree claims this dir; repair that one first once its repair is offered, then rerun),
-              s-moved (moved worktree of app — a repair would also rewrite ~/dev/q; fix that first),
-              t-moved (moved worktree of app — a relative gitdir in this repo, which git versions resolve differently; fix by hand),
-              u-moved (moved worktree of app — a gitdir in this repo can't be read; fix by hand),
-              v\u{fffd} (moved worktree of app — its path isn't UTF-8; rename it to a UTF-8 name, then rerun),
-              w-moved (moved worktree of app — a NUL in its git dir's gitdir, so a repair may change nothing; its fix under --verbose)
+unregistered  owned: app-feat (moved worktree of app — another moved worktree claims this dir; repair that one first once its repair is offered, then rerun)
+                     s-moved (moved worktree of app — a repair would also rewrite ~/dev/q; fix that first)
+                     t-moved (moved worktree of app — a relative gitdir in this repo, which git versions resolve differently; fix by hand)
+                     u-moved (moved worktree of app — a gitdir in this repo can't be read; fix by hand)
+                     v\u{fffd} (moved worktree of app — its path isn't UTF-8; rename it to a UTF-8 name, then rerun)
+                     w-moved (moved worktree of app — a NUL in its git dir's gitdir, so a repair may change nothing; its fix under --verbose)
 clean 1 · on branches 0 · pinned 0      ~/dev/repos.toml · fetched 3h ago
 "
     );
@@ -2481,8 +2504,8 @@ fn a_swapped_worktree_and_a_repair_git_complains_through() {
     assert_eq!(
         render_summary(&r, VIEW, false),
         "\
-unregistered  owned: s-moved (moved worktree of app — git worktree repair),
-              wa (moved worktree of app — swapped with wb; move the dirs back)
+unregistered  owned: s-moved (moved worktree of app — git worktree repair)
+                     wa (moved worktree of app — swapped with wb; move the dirs back)
 clean 1 · on branches 0 · pinned 0      ~/dev/repos.toml · fetched 3h ago
 "
     );
@@ -2704,17 +2727,6 @@ fn printed_commands_are_shell_quoted() {
 }
 
 #[test]
-fn widths_from_columns() {
-    assert_eq!(summary_width(None), DEFAULT_WIDTH);
-    assert_eq!(summary_width(Some("80")), 80);
-    assert_eq!(summary_width(Some(" 120\n")), 120);
-    assert_eq!(summary_width(Some("40")), 40);
-    for unusable in ["39", "0", "", "wide", "-80", "80.5"] {
-        assert_eq!(summary_width(Some(unusable)), DEFAULT_WIDTH, "{unusable}");
-    }
-}
-
-#[test]
 fn color_only_on_a_terminal_without_no_color() {
     assert!(use_color(true, None));
     // no-color.org: an empty value is as good as unset
@@ -2841,91 +2853,56 @@ clean 0 · on branches 0 · pinned 0      ~/dev/repos.toml · fetched 3h ago
 }
 
 #[test]
-fn singles_wrap_between_items_with_a_hanging_indent() {
+fn singles_stand_one_to_a_line() {
     let items = |items: &[&str]| Items::Singles(items.iter().map(|&i| i.to_owned()).collect());
-    let narrow = View { width: 40, ..VIEW };
-    let long = "an item far too long to share any line with others";
+    let long = "an item far too long for any terminal, which runs past its edge unwrapped";
     assert_eq!(
         render_group(
             "needs human",
             Tone::Red,
-            &items(&["aaaa (one)", "bbbb (two)", "cccc (three)", long, "dd"]),
-            narrow,
+            &items(&["aaaa (one)", "bbbb (two)", long]),
+            VIEW,
         ),
-        "\
-needs human   aaaa (one)  bbbb (two)
-              cccc (three)
-              an item far too long to share any line with others
-              dd
+        format!(
+            "\
+needs human   aaaa (one)
+              bbbb (two)
+              {long}
 "
+        )
     );
-    // an item ending exactly at the width fits
+    // a label as wide as the column still gets a space
     assert_eq!(
-        render_group(
-            "x",
-            Tone::Plain,
-            &items(&["aaaa (one)", "bbbb (two)"]),
-            View { width: 36, ..VIEW },
-        ),
-        "x             aaaa (one)  bbbb (two)\n"
+        render_group("uncommitted", Tone::Plain, &items(&["a"]), VIEW),
+        "uncommitted   a\n"
     );
-    assert_eq!(
-        render_group(
-            "x",
-            Tone::Plain,
-            &items(&["aaaa (one)", "bbbb (two)"]),
-            View { width: 35, ..VIEW },
-        ),
-        "x             aaaa (one)\n              bbbb (two)\n"
-    );
-    // widths count chars, not bytes: `−` and `—` are one column each
-    assert_eq!(
-        render_group(
-            "x",
-            Tone::Plain,
-            &items(&["a −1 —", "b −2 —"]),
-            View { width: 28, ..VIEW }
-        ),
-        "x             a −1 —  b −2 —\n"
-    );
-    assert_eq!(render_group("x", Tone::Red, &items(&[]), narrow), "");
+    assert_eq!(render_group("x", Tone::Red, &items(&[]), VIEW), "");
 }
 
 #[test]
-fn runs_wrap_one_to_a_line() {
+fn runs_hang_under_their_first_item() {
     let run = |items: &[&str]| items.iter().map(|&i| i.to_owned()).collect::<Vec<_>>();
-    let runs = Items::Runs(
-        vec![
-            run(&["push a +1", "bb +2", "ccc +3", "dddd +4"]),
-            run(&["ff e −1"]),
-            run(&["move f"]),
-            run(&["clone g", "h"]),
-        ],
-        " · ",
-    );
-    // one line when it fits
+    let runs = Items::Runs(vec![
+        ("push ", run(&["a +1", "bb +2"])),
+        ("ff ", run(&["e −1"])),
+        ("clone ", run(&["g", "h"])),
+    ]);
     assert_eq!(
         render_group("sync would", Tone::Green, &runs, VIEW),
-        "sync would    push a +1, bb +2, ccc +3, dddd +4 · ff e −1 · move f · clone g, h\n"
-    );
-    // else each run starts a line, its items flowing with the `,` kept
-    // at the break, the ` · ` dropped
-    assert_eq!(
-        render_group("sync would", Tone::Green, &runs, View { width: 40, ..VIEW }),
         "\
-sync would    push a +1, bb +2, ccc +3,
-              dddd +4
+sync would    push a +1
+                   bb +2
               ff e −1
-              move f
-              clone g, h
+              clone g
+                    h
 "
     );
 }
 
 #[test]
-fn a_wrapped_sync_line_in_the_summary() {
+fn the_sync_line_in_the_summary() {
     let mut entries = Vec::new();
-    for (key, commits) in [("archives", 13), ("setup", 2), ("fuz_util", 1)] {
+    for (key, commits) in [("archives", 13), ("setup", 2)] {
         let mut e = entry(key, main(), "main");
         e.branches = vec![branch(
             "main",
@@ -2945,23 +2922,19 @@ fn a_wrapped_sync_line_in_the_summary() {
         act(SyncAction::FastForward { commits: 3 }),
     )];
     entries.push(zzz);
-    for key in ["blake3", "corpora"] {
-        entries.push(missing(key));
-    }
+    entries.push(missing("blake3"));
     let r = report(entries);
-    assert!(render_summary(&r, VIEW, false).starts_with(
-        "sync would    push archives +13, setup +2, fuz_util +1 · ff zzz −3 · clone blake3, \
-             corpora\n"
-    ));
+    let text = render_summary(&r, VIEW, false);
     assert!(
-        render_summary(&r, View { width: 50, ..VIEW }, false).starts_with(
+        text.starts_with(
             "\
-sync would    push archives +13, setup +2,
-              fuz_util +1
+sync would    push archives +13
+                   setup +2
               ff zzz −3
-              clone blake3, corpora
+              clone blake3
 "
-        )
+        ),
+        "{text}"
     );
 }
 
@@ -3043,7 +3016,7 @@ fn brief_says_sessions_operation_behind_then_ahead() {
     );
     all.checkouts[0].busy.push(session(10));
     all.checkouts[0].working = vec![session(10)];
-    let line = render_brief(&all, &all.checkouts[0], View { width: 40, ..VIEW }).unwrap();
+    let line = render_brief(&all, &all.checkouts[0], VIEW).unwrap();
     assert_eq!(
         line,
         "repos: app — another live session is working in this checkout; rebase in \
@@ -3303,20 +3276,24 @@ fn rebases_read_as_what_sync_would_do_and_did() {
             .collect(),
     );
     assert!(synced.failed());
-    let text = render_sync_summary(&synced, View { width: 300, ..VIEW }, false);
+    let text = render_sync_summary(&synced, VIEW, false);
     let lines: Vec<&str> = text.lines().collect();
     assert_eq!(
-        lines[..4],
+        lines[..12],
         [
-            "failed        refused (push: fatal: the remote end hung up)  broke (push: git \
-             send-pack reported nothing)  ignored (rebase: error: The following untracked \
-             working tree files would be overwritten by checkout:)",
-            "needs human   conflicted (diverged +6 −16, rebase conflicts)  picked (diverged +6 \
-             −16, ddddddd is already upstream)",
-            "synced        rebase pushed +6 −16, there +6 −16, raced +6 −16, refused +6 −16, \
-             broke +6 −16",
-            "held          push raced +6 (changed since read, rerun) · rebase moved +6 −16 \
-             (changed since read, rerun)",
+            "failed        refused (push: fatal: the remote end hung up)",
+            "              broke (push: git send-pack reported nothing)",
+            "              ignored (rebase: error: The following untracked working tree files \
+             would be overwritten by checkout:)",
+            "needs human   conflicted (diverged +6 −16, rebase conflicts)",
+            "              picked (diverged +6 −16, ddddddd is already upstream)",
+            "synced        rebase pushed +6 −16",
+            "                     there +6 −16",
+            "                     raced +6 −16",
+            "                     refused +6 −16",
+            "                     broke +6 −16",
+            "held          push raced +6 (changed since read, rerun)",
+            "              rebase moved +6 −16 (changed since read, rerun)",
         ],
         "{text}"
     );

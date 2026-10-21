@@ -333,14 +333,6 @@ pub(super) fn format_age(secs: u64) -> String {
     }
 }
 
-/// Items as one run, the first carrying `prefix` (`push `, `owned: `); no
-/// run when there are none.
-pub(super) fn prefixed(prefix: &str, mut items: Vec<String>) -> Option<Vec<String>> {
-    let first = items.first_mut()?;
-    first.insert_str(0, prefix);
-    Some(items)
-}
-
 /// An unprobed checkout's HEAD, after its path.
 pub(super) fn unprobed_head_label(head: Option<&Head>) -> String {
     match head {

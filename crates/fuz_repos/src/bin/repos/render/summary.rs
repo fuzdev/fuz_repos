@@ -479,8 +479,8 @@ fn summary(
     } else {
         "sync would"
     };
-    line(act_label, Tone::Green, Items::Runs(g.act.verbs(), " · "));
-    line("held", Tone::Yellow, Items::Runs(g.held.verbs(), " · "));
+    line(act_label, Tone::Green, Items::Runs(g.act.verbs()));
+    line("held", Tone::Yellow, Items::Runs(g.held.verbs()));
     let lfs_held = held_for_lfs(report, synced);
     if !lfs_held.is_empty() {
         line("", Tone::Plain, hint(lfs_hint(&lfs_held)));
@@ -491,7 +491,7 @@ fn summary(
     line(
         "unregistered",
         Tone::Plain,
-        Items::Runs(unregistered_groups(report, view), "  "),
+        Items::Runs(unregistered_groups(report, view)),
     );
     line("stashes", Tone::Plain, Items::Singles(g.stashes));
     line("unscoped", Tone::Plain, Items::Singles(unscoped));
@@ -600,86 +600,49 @@ impl Counts {
 /// A summary group's items.
 #[derive(Debug)]
 pub(super) enum Items {
-    /// Items that stand apart, two spaces between them.
+    /// Items that stand apart.
     Singles(Vec<String>),
     /// Runs of items — a verb's branches, an ownership's strays — each run's
-    /// items joined by `, `, the runs by the separator.
-    Runs(Vec<Vec<String>>, &'static str),
+    /// prefix (`push `, `owned: `) leading its first item.
+    Runs(Vec<(&'static str, Vec<String>)>),
 }
 
-/// One summary group: its label, then its items from `ITEM_COLUMN`,
-/// wrapped at `view.width` with a hanging indent; nothing when there are no
-/// items.
-///
-/// A line breaks only between items, never inside one: an item too long for
-/// the width stands alone on its line. Singles flow, as many to a line as
-/// fit. Runs that fit on one line share it; otherwise each run starts its
-/// own line (the separator dropped, the run's prefix leading it) and its
-/// items flow from there, a break inside a run leaving the `,` at the line's
-/// end.
+/// One summary group: its label, then its items one to a line from
+/// `ITEM_COLUMN`, the first on the label's line; nothing when there are no
+/// items. A run's prefix leads its first item and the run's other items hang
+/// under that first item's text. Lines never wrap: an item longer than the
+/// terminal runs past it.
 pub(super) fn render_group(label: &str, tone: Tone, items: &Items, view: View<'_>) -> String {
-    // each word with what joins it to the one before on the same line, and
-    // whether it opens a run
-    let mut words: Vec<(&str, Cow<'_, str>, bool)> = Vec::new();
+    // each line's text after the item column
+    let mut lines: Vec<String> = Vec::new();
     match items {
-        Items::Singles(items) => {
-            words.extend(
-                items
-                    .iter()
-                    .map(|item| ("  ", Cow::Borrowed(item.as_str()), false)),
-            );
-        }
-        Items::Runs(runs, sep) => {
-            for run in runs {
+        Items::Singles(items) => lines.extend(items.iter().cloned()),
+        Items::Runs(runs) => {
+            for (prefix, run) in runs {
+                let hang = " ".repeat(prefix.chars().count());
                 for (i, item) in run.iter().enumerate() {
-                    let word = if i + 1 < run.len() {
-                        Cow::Owned(format!("{item},"))
-                    } else {
-                        Cow::Borrowed(item.as_str())
-                    };
-                    words.push(if i == 0 {
-                        (sep, word, true)
-                    } else {
-                        (" ", word, false)
-                    });
+                    let lead = if i == 0 { *prefix } else { hang.as_str() };
+                    lines.push(format!("{lead}{item}"));
                 }
             }
         }
     }
-    if words.is_empty() {
+    if lines.is_empty() {
         return String::new();
     }
-    let chars = |s: &str| s.chars().count();
-    let one_line = ITEM_COLUMN
-        + words
-            .iter()
-            .enumerate()
-            .map(|(i, (join, word, _))| if i == 0 { 0 } else { chars(join) } + chars(word))
-            .sum::<usize>();
-    let run_per_line = one_line > view.width;
-
     let mut out = tone
         .sgr()
         .filter(|_| view.color)
         .map_or_else(|| label.to_owned(), |sgr| format!("{sgr}{label}\x1b[0m"));
-    let pad = ITEM_COLUMN.saturating_sub(chars(label)).max(1);
+    let pad = ITEM_COLUMN.saturating_sub(label.chars().count()).max(1);
     out.extend(std::iter::repeat_n(' ', pad));
-    let mut column = ITEM_COLUMN;
-    for (i, (join, word, opens_run)) in words.iter().enumerate() {
+    for (i, line) in lines.iter().enumerate() {
         if i > 0 {
-            if (run_per_line && *opens_run) || column + chars(join) + chars(word) > view.width {
-                out.push('\n');
-                out.extend(std::iter::repeat_n(' ', ITEM_COLUMN));
-                column = ITEM_COLUMN;
-            } else {
-                out.push_str(join);
-                column += chars(join);
-            }
+            out.extend(std::iter::repeat_n(' ', ITEM_COLUMN));
         }
-        out.push_str(word);
-        column += chars(word);
+        out.push_str(line);
+        out.push('\n');
     }
-    out.push('\n');
     out
 }
 
@@ -721,9 +684,9 @@ impl Actions {
         self.refreshes.push(format!("{key}{note}"));
     }
 
-    /// A run per verb — `refresh lib`, `push a +1, b +2`, `ff …`, `move …`,
+    /// A run per verb — `refresh lib`, `push a +1`, `ff …`, `move …`,
     /// `rebase c +1 −2`, `clone …` — omitting empty verbs.
-    fn verbs(&self) -> Vec<Vec<String>> {
+    fn verbs(&self) -> Vec<(&'static str, Vec<String>)> {
         [
             ("refresh ", &self.refreshes),
             ("push ", &self.push),
@@ -733,7 +696,8 @@ impl Actions {
             ("clone ", &self.clones),
         ]
         .into_iter()
-        .filter_map(|(verb, items)| prefixed(verb, items.clone()))
+        .filter(|(_, items)| !items.is_empty())
+        .map(|(verb, items)| (verb, items.clone()))
         .collect()
     }
 

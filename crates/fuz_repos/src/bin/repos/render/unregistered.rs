@@ -5,7 +5,10 @@ use super::*;
 /// The summary's `unregistered` runs — `owned: …`, `third-party: …`,
 /// `no origin: …` — each stray by dir name, a worktree marked with what it is
 /// and, when moved, its fix. Nothing when the scan didn't run or found none.
-pub(super) fn unregistered_groups(report: &StatusReport, view: View<'_>) -> Vec<Vec<String>> {
+pub(super) fn unregistered_groups(
+    report: &StatusReport,
+    view: View<'_>,
+) -> Vec<(&'static str, Vec<String>)> {
     let mut owned = Vec::new();
     let mut third_party = Vec::new();
     let mut no_origin = Vec::new();
@@ -61,7 +64,7 @@ pub(super) fn unregistered_groups(report: &StatusReport, view: View<'_>) -> Vec<
         ("no origin: ", no_origin),
     ]
     .into_iter()
-    .filter_map(|(group, items)| prefixed(group, items))
+    .filter(|(_, items)| !items.is_empty())
     .collect()
 }
 

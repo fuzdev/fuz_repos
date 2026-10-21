@@ -57,7 +57,7 @@ fn a_reference_is_refreshed_only_when_named_or_under_references() {
         &["status", "--fetch", "--references"],
     ));
     assert!(
-        text.starts_with("sync would    refresh lib · ff lib:main −1\n"),
+        text.starts_with("sync would    refresh lib\n              ff lib:main −1\n"),
         "{text}"
     );
     assert_eq!(ws.https_log(), [lib_url.as_str()]);
@@ -68,7 +68,7 @@ fn a_reference_is_refreshed_only_when_named_or_under_references() {
     let text = stdout(&out);
     assert!(
         text.starts_with(
-            "synced        refresh lib · ff lib:main −1\nheld          refresh oracle (pinned)\n"
+            "synced        refresh lib\n              ff lib:main −1\nheld          refresh oracle (pinned)\n"
         ),
         "{text}"
     );

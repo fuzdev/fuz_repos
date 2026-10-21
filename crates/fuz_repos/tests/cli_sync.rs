@@ -84,7 +84,7 @@ fn an_agents_sync_pushes_as_a_persons_does() {
     // the preview holds nothing for it
     let text = stdout(&agent(&["status"]));
     assert!(
-        text.starts_with("sync would    push blog +1 · clone gone\n"),
+        text.starts_with("sync would    push blog +1\n              clone gone\n"),
         "{text}"
     );
     let out = agent(&["sync"]);
@@ -93,7 +93,11 @@ fn an_agents_sync_pushes_as_a_persons_does() {
     let lines: Vec<&str> = text.lines().collect();
     assert_eq!(
         lines[..lines.len() - 1],
-        ["synced        push blog +1 · ff app −1 · clone gone"],
+        [
+            "synced        push blog +1",
+            "              ff app −1",
+            "              clone gone",
+        ],
         "{text}"
     );
     ws.assert_head(&ws.dir("gone"), Some("main"));
@@ -111,7 +115,11 @@ fn sync_text_is_the_summary_with_what_it_did() {
     let lines: Vec<&str> = text.lines().collect();
     assert_eq!(
         lines[..lines.len() - 1],
-        ["synced        push blog +1 · ff app −1 · clone gone"],
+        [
+            "synced        push blog +1",
+            "              ff app −1",
+            "              clone gone",
+        ],
         "{text}"
     );
     assert!(
@@ -196,7 +204,7 @@ fn sync_text_says_an_action_once_for_entries_sharing_a_repo() {
     assert_eq!(out.status.code(), Some(0), "stderr: {}", stderr(&out));
     let text = stdout(&out);
     assert!(
-        text.starts_with("synced        ff app −1, app:wt −1\n"),
+        text.starts_with("synced        ff app −1\n                 app:wt −1\n"),
         "{text}"
     );
 }

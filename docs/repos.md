@@ -47,7 +47,7 @@ repos status                 # git state of every repos.toml entry, local refs o
 repos status gro .           # narrow to targets: a key, a dir name, or a path inside a checkout (each names its entry); a named reference previews its refresh
 repos status --verbose       # plus stash counts, unscoped sessions, each dirty worktree's own uncommitted item, and a block per entry and unregistered dir
 repos status --json          # the versioned report
-COLUMNS=80 repos status      # text wraps at COLUMNS (100 when unset or under 40); color only on a terminal without NO_COLOR
+NO_COLOR=1 repos status      # text lists each group's items one to a line; color only on a terminal without NO_COLOR
 repos status --fetch         # fetch owned entries (and references asked for) from origin first (writes remote-tracking refs), and check private repos
 repos status --references    # preview refreshing every third-party reference, as sync --references would (no targets with it)
 repos status --jobs 4 --timings # parallelism (default 16), and per-phase timings on stderr

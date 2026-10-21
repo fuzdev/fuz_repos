@@ -37,10 +37,9 @@ fn report(out: &Output) -> serde_json::Value {
     serde_json::from_str(&stdout(out)).unwrap()
 }
 
-/// `repos push` in `cwd`, wide enough that a hint stays on its line.
-fn push_wide(ws: &FixtureWorkspace, cwd: &Path, args: &[&str]) -> Output {
+/// `repos push` in `cwd`.
+fn push_in(ws: &FixtureWorkspace, cwd: &Path, args: &[&str]) -> Output {
     ws.command(REPOS, cwd)
-        .env("COLUMNS", "400")
         .arg("push")
         .args(args)
         .output()
@@ -173,7 +172,7 @@ fn a_held_rebase_exits_one_and_names_the_fix() {
     ws.assert_porcelain(app, &[" M README", "?? scratch.txt"]);
     let before = untouched(&ws, app);
 
-    let out = push_wide(&ws, app, &[]);
+    let out = push_in(&ws, app, &[]);
 
     assert_eq!(out.status.code(), Some(1), "stderr: {}", stderr(&out));
     let text = stdout(&out);
@@ -195,7 +194,7 @@ fn a_held_rebase_exits_one_and_names_the_fix() {
     // the same command rebases and pushes, and the stash goes back on top
     ws.git(app, &["stash", "-u"]);
     ws.assert_clean(app);
-    let out = push_wide(&ws, app, &[]);
+    let out = push_in(&ws, app, &[]);
     assert_eq!(out.status.code(), Some(0), "stderr: {}", stderr(&out));
     let to = ws.git(app, &["rev-parse", "main"]);
     assert_replayed(&ws, &d, &to);
@@ -251,7 +250,7 @@ fn a_conflict_moves_nothing_and_exits_one() {
     // no operation left in progress, as the tool reads one
     assert_eq!(ws.entry("app").checkouts[0].in_progress, None);
 
-    let out = push_wide(&ws, &app, &[]);
+    let out = push_in(&ws, &app, &[]);
     assert_eq!(out.status.code(), Some(1), "stderr: {}", stderr(&out));
     let text = stdout(&out);
     let lines: Vec<&str> = text.lines().collect();
@@ -326,7 +325,7 @@ fn a_rebase_never_replaces_an_ignored_file_and_names_it() {
             "message": said,
         }])
     );
-    let out = push_wide(&ws, &app, &[]);
+    let out = push_in(&ws, &app, &[]);
     assert_eq!(out.status.code(), Some(1), "stderr: {}", stderr(&out));
     assert!(
         stdout(&out).starts_with(&format!("failed        app (rebase: {said})\n")),
@@ -400,7 +399,7 @@ fn a_reason_is_said_with_the_hint_and_exits_one() {
     let mut ws = FixtureWorkspace::new();
     let app = merge_in_range(&mut ws);
 
-    let out = push_wide(&ws, &app, &[]);
+    let out = push_in(&ws, &app, &[]);
 
     assert_eq!(out.status.code(), Some(1), "stderr: {}", stderr(&out));
     let text = stdout(&out);
@@ -636,7 +635,7 @@ fn a_push_the_remote_refuses_leaves_the_branch_rebased_for_the_rerun() {
     ws.assert_clean(app);
 
     // refused again, the rerun says so in text: a branch ahead, no rebase
-    let out = push_wide(&ws, app, &[]);
+    let out = push_in(&ws, app, &[]);
     assert_eq!(out.status.code(), Some(1), "stderr: {}", stderr(&out));
     assert!(
         stdout(&out).starts_with(
@@ -649,7 +648,7 @@ fn a_push_the_remote_refuses_leaves_the_branch_rebased_for_the_rerun() {
 
     // the refusal lifted, the rerun pushes it
     std::fs::remove_file(hook).unwrap();
-    let out = push_wide(&ws, app, &[]);
+    let out = push_in(&ws, app, &[]);
     assert_eq!(out.status.code(), Some(0), "stderr: {}", stderr(&out));
     assert!(
         stdout(&out).starts_with("pushed        app +2\n"),
@@ -683,7 +682,6 @@ fn an_agent_pushes_one_target_and_rebases_another() {
     let out = ws
         .command(REPOS, &ws.root())
         .env("CLAUDECODE", "1")
-        .env("COLUMNS", "400")
         .args(["push", "app", "blog"])
         .output()
         .unwrap();
@@ -703,7 +701,8 @@ fn an_agent_pushes_one_target_and_rebases_another() {
             )
             .as_str(),
             REBASED_HINT,
-            "pushed        app +2  blog +1",
+            "pushed        app +2",
+            "              blog +1",
         ],
         "{text}"
     );

@@ -66,7 +66,7 @@ fn push_exits_one_when_a_branch_isnt_pushed() {
     let text = stdout(&out);
     assert!(
         text.starts_with(
-            "not pushed    app (behind 1)  blog:topic (no upstream on origin)\n              \
+            "not pushed    app (behind 1)\n              blog:topic (no upstream on origin)\n              \
              hint: repos sync fast-forwards a branch behind its upstream (and moves a stale \
              shallow one)\n              \
              hint: the user creates it on origin with repos push --new-branch (an agent \

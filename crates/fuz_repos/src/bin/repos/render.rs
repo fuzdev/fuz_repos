@@ -27,24 +27,8 @@ use fuz_repos::state::{
 /// The label column's width.
 const LABEL_WIDTH: usize = 13;
 
-/// The column a group's items start at, and continuation lines hang from.
+/// The column a group's items start at, each on its own line.
 const ITEM_COLUMN: usize = LABEL_WIDTH + 1;
-
-/// The summary's width when `COLUMNS` doesn't give a usable one.
-pub const DEFAULT_WIDTH: usize = 100;
-
-/// The narrowest `COLUMNS` taken as given; below it the default applies.
-const MIN_WIDTH: usize = 40;
-
-/// The summary's wrap width from `COLUMNS`: its value when it parses to at
-/// least `MIN_WIDTH`, else `DEFAULT_WIDTH`. No terminal-size query — the
-/// same environment wraps the same way, piped or not.
-pub fn summary_width(columns: Option<&str>) -> usize {
-    columns
-        .and_then(|c| c.trim().parse::<usize>().ok())
-        .filter(|w| *w >= MIN_WIDTH)
-        .unwrap_or(DEFAULT_WIDTH)
-}
 
 /// Whether to color the summary's labels: only on a terminal, and never
 /// when `NO_COLOR` is set to anything but the empty string (no-color.org).
@@ -251,15 +235,13 @@ const AUTH_HINT: &str = "the host refused this machine's credentials — over SS
      credential helper holds a valid token";
 
 /// What rendering needs from the environment: the home dir, shown as `~`;
-/// the current time, which the report's timestamps become ages against; the
-/// summary's wrap width; and whether its labels are colored.
+/// the current time, which the report's timestamps become ages against; and
+/// whether the summary's labels are colored.
 #[derive(Debug, Clone, Copy)]
 pub struct View<'a> {
     pub home: Option<&'a str>,
     /// Unix seconds.
     pub now: u64,
-    /// The summary's wrap width, in chars (`summary_width`).
-    pub width: usize,
     /// Color the summary's group labels (`use_color`).
     pub color: bool,
 }
@@ -310,10 +292,10 @@ pub use unregistered::render_unregistered;
 
 use labels::{
     action_verb, clone_held_note, clone_hold_note, clone_label, compact_remote, fetch_fix,
-    first_line, format_age, git_dir_id, held_note, hold_note, needs_human_label, prefixed,
-    prune_loss_label, refresh_held_note, relation_label, session_label, sessions_label,
-    unavailable_label, uncommitted_detail, uncommitted_summary, unprobed_head_label,
-    unreachable_cause, verdict_label, visibility_cause,
+    first_line, format_age, git_dir_id, held_note, hold_note, needs_human_label, prune_loss_label,
+    refresh_held_note, relation_label, session_label, sessions_label, unavailable_label,
+    uncommitted_detail, uncommitted_summary, unprobed_head_label, unreachable_cause, verdict_label,
+    visibility_cause,
 };
 use unregistered::unregistered_groups;
 

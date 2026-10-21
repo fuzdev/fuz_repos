@@ -29,9 +29,9 @@
 //! but for `push --new-branch`, creating a remote branch, which is the
 //! user's and refused there.
 //!
-//! The text summary wraps at `COLUMNS` (100 when unset or under 40), piped
-//! or not, and colors its group labels only when stdout is a terminal and
-//! `NO_COLOR` is unset or empty.
+//! The text summary lists each group's items one to a line, and colors its
+//! group labels only when stdout is a terminal and `NO_COLOR` is unset or
+//! empty.
 //!
 //! `status --brief [<path>]` is the `SessionStart` nudge: at most one plain
 //! line on the checkout holding the path (default: the cwd), from local
@@ -64,7 +64,7 @@ use fuz_repos::{PUSH_FORMAT_VERSION, STATUS_FORMAT_VERSION, SYNC_FORMAT_VERSION}
 
 use crate::render::{
     View, render_brief, render_entry, render_push_summary, render_summary, render_sync_summary,
-    render_unregistered, summary_width, use_color,
+    render_unregistered, use_color,
 };
 
 /// How many entries `status`, `sync`, and `push` work on at once by default.
@@ -398,14 +398,12 @@ impl<'a> Context<'a> {
     /// How rendering sees the environment, for the text summary (under
     /// `--json` nothing renders).
     fn view(&self) -> View<'_> {
-        let columns = std::env::var("COLUMNS").ok();
         View {
             home: self.home.as_deref(),
             now: SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap_or_default()
                 .as_secs(),
-            width: summary_width(columns.as_deref()),
             color: use_color(
                 io::stdout().is_terminal(),
                 std::env::var_os("NO_COLOR").as_deref(),

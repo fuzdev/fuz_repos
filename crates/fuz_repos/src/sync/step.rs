@@ -26,7 +26,7 @@ use crate::state::Head;
 /// checkout that is making progress; a hung filter still ends. A rebase's
 /// replay runs under it too: a long range merges commit by commit, and one
 /// killed part-way has moved nothing.
-pub(super) const CHECKOUT_TIMEOUT: Duration = Duration::from_secs(10 * 60);
+pub(super) const CHECKOUT_TIMEOUT: Duration = Duration::from_mins(10);
 
 /// How a fast-forward or shallow move went, short of failing.
 #[derive(Debug)]

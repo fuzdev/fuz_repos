@@ -562,8 +562,8 @@ impl ConfigFacts {
             .unwrap_or(out)
             .split(|b| *b == 0)
             .collect();
-        let entries = fields.chunks_exact(3);
-        if !entries.remainder().is_empty() {
+        let (entries, remainder) = fields.as_chunks::<3>();
+        if !remainder.is_empty() {
             return Err("config: expected scope, origin, and key per entry".to_owned());
         }
         let utf8 = |b: &[u8]| {
@@ -572,8 +572,7 @@ impl ConfigFacts {
                 .map_err(|_| "config: non-UTF-8 output".to_owned())
         };
         let mut facts = Self::default();
-        for entry in entries {
-            let [scope, origin, entry] = [entry[0], entry[1], entry[2]];
+        for &[scope, origin, entry] in entries {
             let (scope, entry) = (utf8(scope)?, utf8(entry)?);
             let (scope, entry) = (scope.as_str(), entry.as_str());
             // `None`: not UTF-8, so not the repo's own file

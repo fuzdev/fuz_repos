@@ -283,11 +283,11 @@ fn an_entry_without_an_origin_url_is_not_fetched() {
     assert_eq!(ws.git(&gone, &["remote"]), "");
     let bare = ws.dir("bare");
     ws.git(&bare, &["config", "--unset", "remote.origin.url"]);
-    assert!(
+    assert_eq!(
         ws.git_output(&bare, &["config", "remote.origin.url"])
             .status
-            .code()
-            == Some(1)
+            .code(),
+        Some(1)
     );
     assert!(
         !ws.git(&bare, &["config", "--get-regexp", "^remote\\.origin\\."])

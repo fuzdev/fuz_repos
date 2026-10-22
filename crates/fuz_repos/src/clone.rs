@@ -88,7 +88,7 @@ use crate::state::{CloneRecipe, Head};
 /// A first clone of a large repo downloads its history and writes its
 /// whole tree. Long enough for one making progress on a slow
 /// link; a stalled one still ends.
-pub const CLONE_TIMEOUT: Duration = Duration::from_secs(30 * 60);
+pub const CLONE_TIMEOUT: Duration = Duration::from_mins(30);
 
 /// The flags before the recipe's own (the module doc says why each).
 const CLONE_ARGS: [&str; 7] = [

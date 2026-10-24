@@ -3077,10 +3077,10 @@
 			"visibility_check": null
 		},
 		{
-			"key": "mageguild",
+			"key": "lantern",
 			"kind": "repo",
-			"dir": "mageguild",
-			"url": "https://github.com/me/mageguild",
+			"dir": "lantern",
+			"url": "https://github.com/me/lantern",
 			"writable": true,
 			"archived": false,
 			"visibility": "public",
@@ -3099,7 +3099,7 @@
 			},
 			"checkouts": [
 				{
-					"path": "/home/me/dev/mageguild",
+					"path": "/home/me/dev/lantern",
 					"primary": true,
 					"head": {
 						"kind": "branch",
@@ -3122,7 +3122,7 @@
 				{
 					"name": "master",
 					"upstream": "origin/master",
-					"worktree": "/home/me/dev/mageguild",
+					"worktree": "/home/me/dev/lantern",
 					"symref": null,
 					"unique_commits": 0,
 					"newest_commit_at": 1799827200,

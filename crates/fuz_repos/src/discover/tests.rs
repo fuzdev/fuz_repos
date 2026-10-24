@@ -401,7 +401,7 @@ fn suggests_close_keys_best_first() {
     // far from each by edits
     assert!(suggest("fu").is_empty());
     // nothing close
-    assert!(suggest("mageguild").is_empty());
+    assert!(suggest("lantern").is_empty());
     assert!(suggest(".").is_empty());
     assert!(suggest("..").is_empty());
     assert!(suggest("").is_empty());

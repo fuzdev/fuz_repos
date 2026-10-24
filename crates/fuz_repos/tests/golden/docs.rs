@@ -2255,7 +2255,7 @@ fn zzz() -> EntryStatus {
 /// default renamed to `main`: a person's, never cleanup. Its fetch timed
 /// out.
 fn renamed_default() -> EntryStatus {
-    let mut e = entry("mageguild", Some("master"));
+    let mut e = entry("lantern", Some("master"));
     e.checkouts[0].head = on("master");
     e.branches = vec![checked_out(
         branch(
@@ -2264,7 +2264,7 @@ fn renamed_default() -> EntryStatus {
             Relation::Gone,
             Verdict::Quiet,
         ),
-        "mageguild",
+        "lantern",
     )];
     e.needs_human = vec![NeedsHuman::DefaultBranchGone {
         branch: "master".into(),

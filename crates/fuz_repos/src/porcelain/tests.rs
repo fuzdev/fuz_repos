@@ -283,6 +283,9 @@ fn worktree_heads_git_could_not_read_are_unknown() {
     assert!(!is_object_id("0000000000000000000000000000000000000000"));
     assert!(!is_object_id("3890426260f93bbbdf34262c865872c3830283"));
     assert!(!is_object_id("ref: refs/heads/main"));
+    // git prints ids lowercase
+    assert!(!is_object_id("3890426260F93BBBDF34262C865872C38302836E"));
+    assert!(!is_object_id(&"g".repeat(40)));
 }
 
 #[test]

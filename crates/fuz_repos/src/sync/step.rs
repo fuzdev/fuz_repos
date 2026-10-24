@@ -1215,10 +1215,7 @@ pub(super) fn lock_race<'a>(
             .strip_prefix("': ")?;
         if let Some(rest) = rest.strip_prefix("is at ") {
             let (at, expected) = rest.split_once(" but expected ")?;
-            // lowercase, as git prints it
-            let whole = at.len() == expect.len()
-                && porcelain::is_object_id(at)
-                && !at.bytes().any(|b| b.is_ascii_uppercase());
+            let whole = at.len() == expect.len() && porcelain::is_object_id(at);
             return (expected == expect && whole).then_some(LockRace::At(at));
         }
         let gone = rest

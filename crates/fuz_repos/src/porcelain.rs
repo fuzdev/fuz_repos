@@ -238,10 +238,10 @@ pub enum WorktreeHead {
 }
 
 /// Whether `s` is a full object id (SHA-1 or SHA-256 hex) other than the
-/// null one.
+/// null one, in lowercase as git prints it.
 pub fn is_object_id(s: &str) -> bool {
     matches!(s.len(), 40 | 64)
-        && s.bytes().all(|b| b.is_ascii_hexdigit())
+        && s.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
         && s.bytes().any(|b| b != b'0')
 }
 

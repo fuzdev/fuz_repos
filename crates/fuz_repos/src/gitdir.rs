@@ -285,8 +285,9 @@ fn read_gitdir_file(git_dir: &Path) -> std::io::Result<GitdirFile> {
 ///
 /// A file is a C string with trailing whitespace dropped (`read_c_string`,
 /// git's own whitespace); then `ref:` and any whitespace naming a branch,
-/// `refs/heads/<name>`; or an object id followed by the end or whitespace
-/// (anything after is ignored, as git ignores it).
+/// `refs/heads/<name>`; or an object id, hex in either case and reported
+/// lowercase, followed by the end or whitespace (anything after is ignored,
+/// as git ignores it).
 ///
 /// `None` for everything else — a ref outside `refs/heads/`, a name that
 /// isn't UTF-8, and a file that can't be read or has no NUL within the
@@ -370,10 +371,9 @@ fn parse_head(bytes: &[u8]) -> Option<Head> {
         .iter()
         .position(|&b| is_git_space(b))
         .unwrap_or(bytes.len());
-    match std::str::from_utf8(&bytes[..end]) {
-        Ok(id) if is_object_id(id) => Some(Head::Detached {
-            commit: id.to_owned(),
-        }),
+    // git reads hex in either case; the id is kept lowercase, as git prints it
+    match std::str::from_utf8(&bytes[..end]).map(str::to_ascii_lowercase) {
+        Ok(id) if is_object_id(&id) => Some(Head::Detached { commit: id }),
         _ => None,
     }
 }

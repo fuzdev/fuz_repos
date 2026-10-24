@@ -372,6 +372,8 @@ fn a_head_is_read_as_git_reads_a_loose_ref() {
         (format!("{id} junk\n").into_bytes(), at()),
         (format!("{id}\tjunk").into_bytes(), at()),
         (format!("{id}\0junk").into_bytes(), at()),
+        // git: hex in either case, reported lowercase as git prints it
+        (format!("{}\n", id.to_ascii_uppercase()).into_bytes(), at()),
         // git: a broken ref, or no git dir at all
         (format!("{id}junk\n").into_bytes(), unknown()),
         (format!(" {id}\n").into_bytes(), unknown()),

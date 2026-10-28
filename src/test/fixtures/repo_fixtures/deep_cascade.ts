@@ -90,8 +90,10 @@ Small fix in trunk (will escalate to minor due to breaking peer dependency)`
 
 	expected_outcomes: {
 		// Topological order: leaf first, then dependencies in order
-		publishing_order: ['@test/leaf', '@test/branch', '@test/trunk', '@test/root'],
+		order: ['@test/leaf', '@test/branch', '@test/trunk', '@test/root'],
 
+		// each wave publishes together, after the ones before it
+		waves: [['@test/leaf'], ['@test/branch'], ['@test/trunk'], ['@test/root']],
 		version_changes: [
 			{
 				package_name: '@test/leaf',

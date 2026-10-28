@@ -6,9 +6,8 @@ import { styleText as st } from 'node:util';
 import { get_gitops_ready, log_readiness_block } from './gitops_task_helpers.ts';
 import { analyze_repos } from './graph_validation.ts';
 import type { DependencyAnalysis } from './dependency_graph.ts';
-import { generate_publishing_plan, type PublishingPlan } from './publishing_plan.ts';
+import { generate_publishing_plan } from './publishing_plan.ts';
 import { log_publishing_plan } from './publishing_plan_logging.ts';
-import { execute_publishing_plan, type PublishingOptions } from './multi_repo_publisher.ts';
 import { log_dependency_analysis } from './log_helpers.ts';
 import { GITOPS_CONFIG_PATH_DEFAULT } from './gitops_constants.ts';
 import { reconcile_ci, repo_has_workflows } from './ci_reconcile.ts';
@@ -113,13 +112,11 @@ export const task: Task<Args> = {
 			log.error(st('red', `  ✗ gitops_analyze failed: ${error}`));
 		}
 
-		// 2. Run gitops_plan (generated once here and reused by the dry run below)
-		let publishing_plan: PublishingPlan | undefined;
+		// 2. Run gitops_plan
 		log.info(st('yellow', 'Running gitops_plan...'));
 		const plan_start = Date.now();
 		try {
 			const plan = await generate_publishing_plan(local_repos, { verbose });
-			publishing_plan = plan;
 			const plan_duration = Date.now() - plan_start;
 
 			const warnings = plan.warnings.length;
@@ -155,52 +152,7 @@ export const task: Task<Args> = {
 			log.error(st('red', `  ✗ gitops_plan failed: ${error}`));
 		}
 
-		// 3. Run gitops_publish (dry run)
-		log.info(st('yellow', 'Running gitops_publish (dry run)...'));
-		const dry_start = Date.now();
-		try {
-			const options: PublishingOptions = {
-				wetrun: false,
-				log: undefined // Silent for validation
-			};
-
-			// Reuse the plan from step 2 (regenerate only if that step failed to produce one).
-			const result = await execute_publishing_plan(
-				local_repos,
-				publishing_plan ?? (await generate_publishing_plan(local_repos, { verbose })),
-				options
-			);
-			const dry_duration = Date.now() - dry_start;
-
-			// Dry run doesn't have warnings/errors in the same format
-			// We'll just check if it succeeded
-			const errors = result.ok ? 0 : result.failed.length;
-
-			results.push({
-				command: 'gitops_publish (dry run)',
-				success: result.ok,
-				warnings: 0,
-				errors,
-				duration: dry_duration
-			});
-
-			log.info(st('green', `  ✓ gitops_publish (dry run) completed in ${dry_duration}ms`));
-			if (errors > 0) {
-				log.error(st('red', `  ❌ Found ${errors} error(s)`));
-			}
-		} catch (error) {
-			const dry_duration = Date.now() - dry_start;
-			results.push({
-				command: 'gitops_publish (dry run)',
-				success: false,
-				warnings: 0,
-				errors: 1,
-				duration: dry_duration
-			});
-			log.error(st('red', `  ✗ gitops_publish (dry run) failed: ${error}`));
-		}
-
-		// 4. Reconcile each repo's registry-declared `ci` against actual workflow files on disk.
+		// 3. Reconcile each repo's registry-declared `ci` against actual workflow files on disk.
 		log.info(st('yellow', 'Running ci_reconcile...'));
 		const ci_start = Date.now();
 		try {

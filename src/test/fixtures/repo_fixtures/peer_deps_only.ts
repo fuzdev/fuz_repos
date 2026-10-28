@@ -113,14 +113,13 @@ Small fix (should escalate to minor due to core breaking change)`
 	expected_outcomes: {
 		// Note: plugin_a, plugin_b, and adapter have no dependency relationship,
 		// so they're ordered deterministically within their tier
-		publishing_order: [
-			'@test/utils',
-			'@test/core',
-			'@test/adapter',
-			'@test/plugin_b',
-			'@test/plugin_a'
-		],
+		order: ['@test/utils', '@test/core', '@test/adapter', '@test/plugin_b', '@test/plugin_a'],
 
+		// each wave publishes together, after the ones before it
+		waves: [
+			['@test/core', '@test/utils'],
+			['@test/plugin_a', '@test/plugin_b', '@test/adapter']
+		],
 		version_changes: [
 			{
 				package_name: '@test/core',

@@ -44,8 +44,10 @@ export interface RepoFixtureSet {
 	repos: Array<RepoFixtureData>;
 	/** Expected outcomes when running publishing operations */
 	expected_outcomes: {
-		/** Expected topological order for publishing */
-		publishing_order: Array<string>;
+		/** Expected topological order of every package, over prod/peer edges */
+		order: Array<string>;
+		/** Expected waves of the packages that publish (each publishes together) */
+		waves: Array<Array<string>>;
 		/** Expected version changes */
 		version_changes: Array<RepoFixtureExpectedVersionChange>;
 		/** Expected breaking change cascades (source package -> affected packages) */

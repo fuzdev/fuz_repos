@@ -1,29 +1,7 @@
 import { assert, describe, test } from 'vitest';
 
-import {
-	format_readiness_ahead,
-	format_readiness_block,
-	repos_not_at_rest
-} from '#lib/repo_readiness.ts';
+import { format_readiness_block, repos_not_at_rest } from '#lib/repo_readiness.ts';
 import { AT_REST, create_mock_repos_entry, entry_with } from './test_helpers.ts';
-
-describe('format_readiness_ahead', () => {
-	test('says whether the release push carries the commits', () => {
-		const ahead = { key: 'fuz_ui', branch: 'main', commits: 2 };
-		assert.strictEqual(
-			format_readiness_ahead(ahead, true),
-			'fuz_ui: `main` is 2 commits ahead of origin — publishing pushes them with the release'
-		);
-		assert.strictEqual(
-			format_readiness_ahead(ahead, false),
-			"fuz_ui: `main` is 2 commits ahead of origin — it doesn't publish, so they stay unpushed until `repos sync` or `repos push`"
-		);
-		assert.include(
-			format_readiness_ahead(ahead, false, { repos_command: 'repos --registry ../r.toml' }),
-			'until `repos --registry ../r.toml sync` or `repos --registry ../r.toml push`'
-		);
-	});
-});
 
 describe('format_readiness_block', () => {
 	test('no lines when every repo is at rest', () => {
@@ -49,7 +27,7 @@ describe('format_readiness_block', () => {
 			})
 		]);
 		assert.deepEqual(format_readiness_block(not_ready, now), [
-			'not at rest, so read as they sit (a real publish refuses all but a branch ahead of origin):',
+			'not at rest, so read as they sit (a release step holds all but a branch ahead of origin):',
 			'  feature: on `repos-tool`, not `main`',
 			'  stale: `main` is 3 commits behind origin (fetched 2h ago)',
 			'  dirty: uncommitted changes (1 untracked)',

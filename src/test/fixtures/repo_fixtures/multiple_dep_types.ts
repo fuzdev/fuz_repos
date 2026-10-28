@@ -81,8 +81,10 @@ Small fix in plugin`
 	expected_outcomes: {
 		// Note: adapter has only devDep on core (no prod/peer deps)
 		// With exclude_dev=true in topological sort, adapter and core are both tier 0
-		publishing_order: ['@test/core', '@test/adapter', '@test/plugin'],
+		order: ['@test/core', '@test/adapter', '@test/plugin'],
 
+		// each wave publishes together, after the ones before it
+		waves: [['@test/core'], ['@test/plugin']],
 		version_changes: [
 			{
 				package_name: '@test/core',

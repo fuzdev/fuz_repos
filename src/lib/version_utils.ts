@@ -54,15 +54,70 @@ export const normalize_version_for_comparison = (version: string): string => {
 	return strip_version_prefix(version);
 };
 
+/**
+ * Whether a dependency range must move to name `new_version`: a wildcard always
+ * does, and so does a range whose base version is older. One already naming
+ * it, or a newer version (a range staged ahead of a publish), doesn't — the
+ * rewrite never moves a range backward. A base that isn't `x.y.z` moves
+ * whenever it differs, and a protocol range (`file:`, `workspace:`, `npm:`) never.
+ *
+ * @example
+ * ```ts
+ * needs_update('^0.54.0', '0.55.0') // true
+ * ```
+ * @example
+ * ```ts
+ * needs_update('>=0.56.0', '0.55.0') // false
+ * ```
+ */
 export const needs_update = (current: string, new_version: string): boolean => {
-	// Always update wildcards
+	// a protocol range (`file:`, `workspace:`, `npm:` alias) names no registry version to move
+	if (current.includes(':')) return false;
 	if (is_wildcard(current)) return true;
+	const base = normalize_version_for_comparison(current);
+	const next = normalize_version_for_comparison(new_version);
+	if (base === next) return false;
+	const order = compare_versions(base, next);
+	return order === null || order < 0;
+};
 
-	// Compare normalized versions
-	const current_normalized = normalize_version_for_comparison(current);
-	const new_normalized = normalize_version_for_comparison(new_version);
+const VERSION_REGEX = /^(\d+)\.(\d+)\.(\d+)$/;
 
-	return current_normalized !== new_normalized;
+/**
+ * Compares two `x.y.z` versions.
+ *
+ * @returns negative when `a` is older, positive when newer, `0` when equal, or `null` when either isn't `x.y.z`
+ */
+export const compare_versions = (a: string, b: string): number | null => {
+	const pa = VERSION_REGEX.exec(a);
+	const pb = VERSION_REGEX.exec(b);
+	if (!pa || !pb) return null;
+	for (let i = 1; i <= 3; i++) {
+		const diff = Number(pa[i]) - Number(pb[i]);
+		if (diff !== 0) return diff;
+	}
+	return 0;
+};
+
+/**
+ * The bump a dependency range's move to `new_version` amounts to, measured
+ * from the range's base version, and whether that's breaking — so a range
+ * lagging behind its dependency's last release counts what it skips.
+ *
+ * @example
+ * ```ts
+ * to_range_update_bump('^0.54.0', '0.55.1') // {bump_type: 'minor', breaking: true}
+ * ```
+ * @returns the bump, or `null` when the range has no `x.y.z` base (a wildcard, a compound range)
+ */
+export const to_range_update_bump = (
+	current: string,
+	new_version: string
+): { bump_type: BumpType; breaking: boolean } | null => {
+	const base = normalize_version_for_comparison(current);
+	if (!VERSION_REGEX.test(base) || !VERSION_REGEX.test(new_version)) return null;
+	const bump_type = detect_bump_type(base, new_version);
+	return { bump_type, breaking: is_breaking_change(base, bump_type) };
 };
 
 /**
@@ -108,7 +163,7 @@ export const to_version_strategy_prefix = (strategy: VersionStrategy): '' | '^' 
 /**
  * The range a dependency entry is rewritten to when `version` publishes: the
  * current range's prefix kept (see `get_update_prefix`), else the strategy's.
- * The executor writes it and the plan shows it, so the two agree.
+ * The release step writes it and the plan shows it, so the two agree.
  *
  * @example
  * ```ts
@@ -145,7 +200,7 @@ export const is_breaking_change = (old_version: string, bump_type: BumpType): bo
  * 1.0+: `major` for a breaking dependency, otherwise `patch`.
  *
  * Single source of truth for the dependency-driven bump rule, shared by the plan
- * (`get_required_bump_for_dependencies`) and the auto-changeset generator
+ * (`generate_publishing_plan`) and the auto-changeset generator
  * (`calculate_required_bump`) so the two never drift.
  *
  * @param current_version - the package's current version, used to detect the pre-1.0 regime

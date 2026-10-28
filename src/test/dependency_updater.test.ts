@@ -4,7 +4,49 @@ import { join } from 'node:path';
 import { update_package_json } from '#lib/dependency_updater.ts';
 import { create_mock_repo, create_mock_git_ops, create_mock_fs_ops } from './test_helpers.ts';
 import type { GitOperations } from '#lib/operations.ts';
-import type { PublishedVersion } from '#lib/multi_repo_publisher.ts';
+import type { LocalRepo } from '#lib/local_repo.ts';
+import type { DependencyUpdate } from '#lib/publishing_plan.ts';
+
+/**
+ * The dependency updates moving each named dependency of `repo` to its
+ * version, one per section that lists it, as the plan reports them.
+ */
+const to_updates = (repo: LocalRepo, versions: Map<string, string>): Array<DependencyUpdate> => {
+	const updates: Array<DependencyUpdate> = [];
+	const sections = [
+		['dependencies', repo.dependencies],
+		['peerDependencies', repo.peer_dependencies],
+		['devDependencies', repo.dev_dependencies]
+	] as const;
+	for (const [name, version] of versions) {
+		let listed = false;
+		for (const [type, deps] of sections) {
+			const current = deps?.get(name);
+			if (current === undefined) continue;
+			listed = true;
+			updates.push({
+				dependent_package: repo.library.name,
+				updated_dependency: name,
+				current_version: current,
+				new_version: version,
+				type,
+				breaking: false
+			});
+		}
+		// a dependency the repo doesn't list still reaches the rewrite, which skips it
+		if (!listed) {
+			updates.push({
+				dependent_package: repo.library.name,
+				updated_dependency: name,
+				current_version: '0.0.0',
+				new_version: version,
+				type: 'dependencies',
+				breaking: false
+			});
+		}
+	}
+	return updates;
+};
 
 /**
  * Creates mock git operations that track calls
@@ -74,7 +116,7 @@ describe('dependency_updater', () => {
 			const updates = new Map([['dep-a', '1.1.0']]);
 			const git_ops = create_trackable_git_ops();
 
-			await update_package_json(repo, updates, { git_ops, fs_ops: fs });
+			await update_package_json(repo, to_updates(repo, updates), { git_ops, fs_ops: fs });
 
 			const updated = fs.get(package_json_path);
 			assert.ok(updated !== undefined);
@@ -112,7 +154,7 @@ describe('dependency_updater', () => {
 			const updates = new Map([['dev-a', '2.0.0']]);
 			const git_ops = create_trackable_git_ops();
 
-			await update_package_json(repo, updates, { git_ops, fs_ops: fs });
+			await update_package_json(repo, to_updates(repo, updates), { git_ops, fs_ops: fs });
 
 			const updated = fs.get(package_json_path);
 			const parsed = JSON.parse(updated!);
@@ -147,7 +189,7 @@ describe('dependency_updater', () => {
 			const updates = new Map([['peer-a', '3.1.0']]);
 			const git_ops = create_trackable_git_ops();
 
-			await update_package_json(repo, updates, { git_ops, fs_ops: fs });
+			await update_package_json(repo, to_updates(repo, updates), { git_ops, fs_ops: fs });
 
 			const updated = fs.get(package_json_path);
 			const parsed = JSON.parse(updated!);
@@ -182,7 +224,11 @@ describe('dependency_updater', () => {
 			const updates = new Map([['dep-a', '1.1.0']]);
 			const git_ops = create_trackable_git_ops();
 
-			await update_package_json(repo, updates, { strategy: 'tilde', git_ops, fs_ops: fs });
+			await update_package_json(repo, to_updates(repo, updates), {
+				strategy: 'tilde',
+				git_ops,
+				fs_ops: fs
+			});
 
 			const updated = fs.get(package_json_path);
 			const parsed = JSON.parse(updated!);
@@ -217,7 +263,11 @@ describe('dependency_updater', () => {
 			const updates = new Map([['dep-a', '1.1.0']]);
 			const git_ops = create_trackable_git_ops();
 
-			await update_package_json(repo, updates, { strategy: 'exact', git_ops, fs_ops: fs });
+			await update_package_json(repo, to_updates(repo, updates), {
+				strategy: 'exact',
+				git_ops,
+				fs_ops: fs
+			});
 
 			const updated = fs.get(package_json_path);
 			const parsed = JSON.parse(updated!);
@@ -252,7 +302,7 @@ describe('dependency_updater', () => {
 			const updates = new Map([['@fuzdev/fuz_util', '0.39.0']]);
 			const git_ops = create_trackable_git_ops();
 
-			await update_package_json(repo, updates, { git_ops, fs_ops: fs });
+			await update_package_json(repo, to_updates(repo, updates), { git_ops, fs_ops: fs });
 
 			const updated = fs.get(package_json_path);
 			const parsed = JSON.parse(updated!);
@@ -287,7 +337,11 @@ describe('dependency_updater', () => {
 			const updates = new Map([['dep-a', '1.1.0']]);
 			const git_ops = create_trackable_git_ops();
 
-			await update_package_json(repo, updates, { strategy: 'gte', git_ops, fs_ops: fs });
+			await update_package_json(repo, to_updates(repo, updates), {
+				strategy: 'gte',
+				git_ops,
+				fs_ops: fs
+			});
 
 			const updated = fs.get(package_json_path);
 			const parsed = JSON.parse(updated!);
@@ -334,7 +388,7 @@ describe('dependency_updater', () => {
 			]);
 			const git_ops = create_trackable_git_ops();
 
-			await update_package_json(repo, updates, { git_ops, fs_ops: fs });
+			await update_package_json(repo, to_updates(repo, updates), { git_ops, fs_ops: fs });
 
 			const updated = fs.get(package_json_path);
 			const parsed = JSON.parse(updated!);
@@ -367,7 +421,7 @@ describe('dependency_updater', () => {
 			const updates = new Map([['dep-a', '1.1.0']]);
 			const git_ops = create_trackable_git_ops();
 
-			await update_package_json(repo, updates, { git_ops, fs_ops: fs });
+			await update_package_json(repo, to_updates(repo, updates), { git_ops, fs_ops: fs });
 
 			const updated = fs.get(package_json_path);
 			// Check it has tabs (JSON.stringify uses tabs)
@@ -399,7 +453,7 @@ describe('dependency_updater', () => {
 			const updates = new Map([['dep-a', '1.1.0']]);
 			const git_ops = create_trackable_git_ops();
 
-			await update_package_json(repo, updates, { git_ops, fs_ops: fs });
+			await update_package_json(repo, to_updates(repo, updates), { git_ops, fs_ops: fs });
 
 			assert.ok(git_ops.added_files.includes('package.json'));
 			assert.strictEqual(git_ops.commits.length, 1);
@@ -430,23 +484,13 @@ describe('dependency_updater', () => {
 			);
 
 			const updates = new Map([['dep-a', '1.1.0']]);
-			const published_versions: Map<string, PublishedVersion> = new Map([
-				[
-					'dep-a',
-					{
-						name: 'dep-a',
-						old_version: '1.0.0',
-						new_version: '1.1.0',
-						bump_type: 'minor',
-						breaking: false,
-						commit: 'abc123',
-						tag: 'v1.1.0'
-					}
-				]
-			]);
 			const git_ops = create_trackable_git_ops();
 
-			await update_package_json(repo, updates, { published_versions, git_ops, fs_ops: fs });
+			await update_package_json(repo, to_updates(repo, updates), {
+				changeset: true,
+				git_ops,
+				fs_ops: fs
+			});
 
 			assert.strictEqual(git_ops.committed_files.length, 1);
 			const committed = git_ops.committed_files[0]!;
@@ -465,7 +509,7 @@ describe('dependency_updater', () => {
 			const updates: Map<string, string> = new Map();
 			const git_ops = create_trackable_git_ops();
 
-			await update_package_json(repo, updates, { git_ops, fs_ops: fs });
+			await update_package_json(repo, to_updates(repo, updates), { git_ops, fs_ops: fs });
 
 			assert.strictEqual(git_ops.added_files.length, 0);
 			assert.strictEqual(git_ops.commits.length, 0);
@@ -496,7 +540,7 @@ describe('dependency_updater', () => {
 			const updates = new Map([['dep-b', '2.0.0']]);
 			const git_ops = create_trackable_git_ops();
 
-			await update_package_json(repo, updates, { git_ops, fs_ops: fs });
+			await update_package_json(repo, to_updates(repo, updates), { git_ops, fs_ops: fs });
 
 			assert.strictEqual(git_ops.commits.length, 0);
 		});
@@ -520,12 +564,44 @@ describe('dependency_updater', () => {
 			);
 			const git_ops = create_trackable_git_ops();
 
-			await update_package_json(repo, new Map([['lib', '1.1.0']]), { git_ops, fs_ops: fs });
+			await update_package_json(repo, to_updates(repo, new Map([['lib', '1.1.0']])), {
+				git_ops,
+				fs_ops: fs
+			});
 
 			const parsed = JSON.parse(fs.get(package_json_path)!);
 			assert.strictEqual(parsed.peerDependencies.lib, '>=1.1.0');
 			assert.strictEqual(parsed.devDependencies.lib, '^1.1.0');
 			assert.strictEqual(git_ops.commits.length, 1);
+		});
+
+		test('never moves a range staged ahead in another section', async () => {
+			const fs = create_mock_fs_ops();
+			const repo = create_mock_repo({
+				name: 'test-pkg',
+				peer_deps: { lib: '>=0.56.0' },
+				dev_deps: { lib: '^0.54.0' }
+			});
+			const package_json_path = join(repo.repo_dir, 'package.json');
+			fs.set(
+				package_json_path,
+				JSON.stringify({
+					name: 'test-pkg',
+					version: '1.0.0',
+					peerDependencies: { lib: '>=0.56.0' },
+					devDependencies: { lib: '^0.54.0' }
+				})
+			);
+			const git_ops = create_trackable_git_ops();
+
+			await update_package_json(repo, to_updates(repo, new Map([['lib', '0.55.0']])), {
+				git_ops,
+				fs_ops: fs
+			});
+
+			const parsed = JSON.parse(fs.get(package_json_path)!);
+			assert.strictEqual(parsed.peerDependencies.lib, '>=0.56.0');
+			assert.strictEqual(parsed.devDependencies.lib, '^0.55.0');
 		});
 
 		// the dev-dependency pass after a peer rewrite already moved the dev entry:
@@ -547,7 +623,10 @@ describe('dependency_updater', () => {
 			fs.set(package_json_path, content);
 			const git_ops = create_trackable_git_ops();
 
-			await update_package_json(repo, new Map([['lib', '1.1.0']]), { git_ops, fs_ops: fs });
+			await update_package_json(repo, to_updates(repo, new Map([['lib', '1.1.0']])), {
+				git_ops,
+				fs_ops: fs
+			});
 
 			assert.strictEqual(fs.get(package_json_path), content);
 			assert.strictEqual(git_ops.added_files.length, 0);
@@ -565,25 +644,11 @@ describe('dependency_updater', () => {
 			});
 			fs.set(package_json_path, content);
 			const git_ops = create_trackable_git_ops();
-			const published_versions: Map<string, PublishedVersion> = new Map([
-				[
-					'lib',
-					{
-						name: 'lib',
-						old_version: '1.0.0',
-						new_version: '1.1.0',
-						bump_type: 'minor',
-						breaking: false,
-						commit: 'abc',
-						tag: 'v1.1.0'
-					}
-				]
-			]);
 
 			let error: unknown;
 			try {
-				await update_package_json(repo, new Map([['lib', '1.1.0']]), {
-					published_versions,
+				await update_package_json(repo, to_updates(repo, new Map([['lib', '1.1.0']])), {
+					changeset: true,
 					git_ops,
 					fs_ops: fs
 				});

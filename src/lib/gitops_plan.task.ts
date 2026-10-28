@@ -18,6 +18,7 @@ import {
 	type PublishingPlan
 } from './publishing_plan.ts';
 import {
+	format_waves,
 	log_publishing_plan,
 	to_dependency_type_label,
 	type LogPlanOptions
@@ -55,8 +56,10 @@ export const Args = s.object({
 export type Args = s.Infer<typeof Args>;
 
 /**
- * Generate a publishing plan showing what would happen during multi-repo publishing.
- * Shows version changes, dependency updates, and breaking change cascades.
+ * Generate a publishing plan showing what a release would publish, offline: the
+ * waves, version changes, dependency updates, and breaking change cascades.
+ * It asks no registry, so every current version counts as released; `gro
+ * gitops_release` plans from what the registry shows.
  *
  * Usage:
  *   `gro gitops_plan`
@@ -138,10 +141,12 @@ const create_plan_formatters = (
 ): OutputFormatters<PublishingPlan> => ({
 	json: (plan) => {
 		const output = {
-			publishing_order: plan.publishing_order,
+			waves: plan.waves,
 			version_changes: plan.version_changes,
 			dependency_updates: plan.dependency_updates,
 			breaking_cascades: Object.fromEntries(plan.breaking_cascades),
+			awaiting_registry: plan.awaiting_registry,
+			never_published: plan.never_published,
 			warnings: plan.warnings,
 			info: plan.info,
 			no_changes: plan.no_changes,
@@ -156,7 +161,7 @@ const create_plan_formatters = (
 const format_plan_as_markdown = (plan: PublishingPlan): Array<string> => {
 	const lines: Array<string> = [];
 	const {
-		publishing_order,
+		waves,
 		version_changes,
 		dependency_updates,
 		breaking_cascades,
@@ -179,11 +184,13 @@ const format_plan_as_markdown = (plan: PublishingPlan): Array<string> => {
 		lines.push('');
 	}
 
-	// Publishing order
-	if (publishing_order.length > 0) {
-		lines.push('## Publishing Order');
+	// Waves
+	if (waves.length > 0) {
+		lines.push('## Waves');
 		lines.push('');
-		lines.push(publishing_order.map((p) => `\`${p}\``).join(' → '));
+		lines.push("*Each wave's packages publish together, after the waves before it:*");
+		lines.push('');
+		lines.push(...format_waves(waves.map((wave) => wave.map((p) => `\`${p}\``))));
 		lines.push('');
 	}
 

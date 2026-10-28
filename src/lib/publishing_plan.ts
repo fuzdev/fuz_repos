@@ -1,22 +1,38 @@
+/**
+ * The publishing plan: what a release of the configured packages publishes,
+ * in what versions, and the dependency rewrites that go with it.
+ *
+ * `generate_publishing_plan` resolves the whole cascade in one pass over the
+ * prod/peer topological order — explicit changesets, bump escalations a
+ * breaking dependency forces, and auto-generated changesets for dependents —
+ * then groups the packages that publish into waves: a wave's packages don't
+ * depend on each other, so they publish together.
+ *
+ * The plan reads each package as its checkout sits. Given what the registry
+ * shows (`GeneratePlanOptions.registry`), it also accounts for releases already
+ * made: a package whose current version is out counts as released, and a
+ * dependent whose range still trails it gets the rewrite it missed.
+ *
+ * @module
+ */
+
 import type { Logger } from '@fuzdev/fuz_util/log.ts';
 import { styleText as st } from 'node:util';
 
 import { repo_is_npm, type LocalRepo } from './local_repo.ts';
 import { validate_dependency_graph } from './graph_validation.ts';
+import { group_into_levels, to_rank, type DependencyGraph } from './dependency_graph.ts';
 import {
 	type BumpType,
 	is_breaking_change,
 	compare_bump_types,
-	calculate_next_version
+	calculate_next_version,
+	required_bump_for_dependency_update
 } from './version_utils.ts';
 import type { ChangesetOperations } from './operations.ts';
+import type { RegistryVersion } from './npm_registry.ts';
 import { default_changeset_operations } from './operations_defaults.ts';
-import { GITOPS_MAX_ITERATIONS_DEFAULT } from './gitops_constants.ts';
-import type { DependencyGraph } from './dependency_graph.ts';
-import {
-	calculate_dependency_updates,
-	get_required_bump_for_dependencies
-} from './publishing_plan_helpers.ts';
+import { calculate_dependency_updates, to_dependency_updates } from './publishing_plan_helpers.ts';
 
 export interface VersionChange {
 	package_name: string;
@@ -34,44 +50,37 @@ export interface VersionChange {
 /**
  * How a version change arises in the plan: from the package's own changesets
  * (`explicit`), from its changesets with the bump raised to what a breaking
- * dependency requires (`escalation`), or from a changeset the executor
- * generates for a dependency update (`auto`).
+ * dependency requires (`escalation`), or from a changeset generated for a
+ * dependency update (`auto`).
  */
 export type VersionChangeKind = 'explicit' | 'escalation' | 'auto';
 
 /**
  * Classifies a version change — the one classification the plan's logger,
- * markdown, and side-effect preview share. A change without changesets of its
- * own is `auto` even if its bump was raised.
+ * markdown, and release step share. A change without changesets of its own is
+ * `auto` even if its bump was raised.
  */
 export const version_change_kind = (change: VersionChange): VersionChangeKind =>
 	!change.has_changesets ? 'auto' : change.needs_bump_escalation ? 'escalation' : 'explicit';
 
+/** A dependency range that moves to name its dependency's version after the release. */
 export interface DependencyUpdate {
 	dependent_package: string;
 	updated_dependency: string;
+	/** The range as the dependent's `package.json` has it. */
 	current_version: string;
+	/** The dependency's version after the release. */
 	new_version: string;
 	type: 'dependencies' | 'devDependencies' | 'peerDependencies';
+	/** Whether the move from the range's base version is breaking. */
+	breaking: boolean;
 }
 
-/**
- * Whether a dev-dependency update rides along with a prod/peer update of the
- * same dependency in the same package. The publish pass rewrites every section
- * that names a published dependency (`update_package_json`), so such a dev
- * entry has already moved by the dev-dependency pass, which skips it.
- */
-export const dev_update_rides_along = (
-	update: DependencyUpdate,
-	dependency_updates: Array<DependencyUpdate>
-): boolean =>
-	update.type === 'devDependencies' &&
-	dependency_updates.some(
-		(u) =>
-			u.type !== 'devDependencies' &&
-			u.dependent_package === update.dependent_package &&
-			u.updated_dependency === update.updated_dependency
-	);
+/** A package whose current version the registry doesn't show, with no changesets to publish. */
+export interface AwaitingRegistry {
+	name: string;
+	version: string;
+}
 
 // Verbose data types for diagnostic output
 export interface VerboseChangesetDetail {
@@ -79,24 +88,7 @@ export interface VerboseChangesetDetail {
 	files: Array<{ filename: string; bump_type: BumpType; summary: string }>;
 }
 
-export interface VerboseIterationPackage {
-	name: string;
-	changeset_count: number;
-	bump_from_changesets: BumpType | null;
-	required_bump: BumpType | null;
-	triggering_dep: string | null;
-	action: 'publish' | 'auto_changeset' | 'escalation' | 'skip';
-	version_to: string | null;
-	is_breaking: boolean;
-}
-
-export interface VerboseIteration {
-	iteration: number;
-	packages: Array<VerboseIterationPackage>;
-	new_changes: number;
-}
-
-/** A breaking package and the direct prod/peer dependents its publish rewrites. */
+/** A breaking package and the direct prod/peer dependents its release rewrites. */
 export interface VerbosePropagation {
 	source: string;
 	dependents: Array<{ pkg: string; dep_type: 'prod' | 'peer'; action: string }>;
@@ -113,17 +105,37 @@ export interface VerboseGraphSummary {
 
 export interface VerboseData {
 	changeset_details: Array<VerboseChangesetDetail>;
-	iterations: Array<VerboseIteration>;
 	propagations: Array<VerbosePropagation>;
 	graph_summary: VerboseGraphSummary;
-	total_iterations: number;
 }
 
 export interface PublishingPlan {
-	publishing_order: Array<string>;
+	/**
+	 * The packages that publish, grouped by their longest prod/peer path to
+	 * other packages that publish: a wave's packages depend only on earlier
+	 * waves, never on each other, so each wave publishes together. In config
+	 * order within a wave.
+	 */
+	waves: Array<Array<string>>;
 	version_changes: Array<VersionChange>;
 	dependency_updates: Array<DependencyUpdate>;
 	breaking_cascades: Map<string, Array<string>>;
+	/**
+	 * Packages whose current version the registry doesn't show, with no
+	 * changesets: just published and still propagating, or a publish that
+	 * failed. A package the registry has never seen is here too when another
+	 * configured package has a prod/peer range on it — a first publish npm
+	 * answers E404 for until it shows. Empty without registry observations.
+	 */
+	awaiting_registry: Array<AwaitingRegistry>;
+	/**
+	 * Packages the registry has never seen, with no changesets of their own and
+	 * no configured package depending on them for prod or peer — apps or sites
+	 * that never publish, most likely, which `private` would say. Like private
+	 * packages they're update-only leaves: no auto-bump, and no range moves for
+	 * them. Empty without registry observations.
+	 */
+	never_published: Array<string>;
 	warnings: Array<string>;
 	/** Informational sentences, not warnings: excluded non-npm repos, dev dependency cycles. */
 	info: Array<string>;
@@ -137,30 +149,33 @@ export interface GeneratePlanOptions {
 	log?: Logger;
 	ops?: ChangesetOperations;
 	verbose?: boolean;
-}
-
-type ChangesetPresence = Awaited<ReturnType<ChangesetOperations['has_changesets']>>;
-
-/**
- * The plan's working state, shared by the initial pass and the fixed-point
- * iteration that extends it.
- */
-interface CascadeState {
-	version_changes: Array<VersionChange>;
-	predicted_versions: Map<string, string>;
-	breaking_packages: Set<string>;
+	/**
+	 * What the registry shows for each package's current version, by name. With
+	 * no changesets, an `unlisted` one is `awaiting_registry`, and so is an
+	 * `unknown` one some package depends on for prod or peer; any other
+	 * `unknown` one is `never_published`. Without it, every current version
+	 * counts as released.
+	 */
+	registry?: ReadonlyMap<string, RegistryVersion>;
 }
 
 /**
- * Generates a publishing plan showing what would happen during publishing.
- * Shows version changes, dependency updates, and breaking change cascades.
- * Uses fixed-point iteration to resolve transitive cascades.
+ * Generates the publishing plan in one pass over the prod/peer topological
+ * order. Each package's dependencies are settled before it is reached, so its
+ * required bump — from its prod/peer ranges against each dependency's version
+ * after the release — is final when computed: explicit changesets, escalation,
+ * or an auto-changeset, with no iteration.
+ *
+ * Every package's version after the release is its predicted one when it
+ * publishes and its current one otherwise, so a dependent whose range trails a
+ * dependency's current version gets that rewrite too, along with the bump it
+ * implies.
  */
 export const generate_publishing_plan = async (
 	all_repos: Array<LocalRepo>,
 	options: GeneratePlanOptions = {}
 ): Promise<PublishingPlan> => {
-	const { log, ops = default_changeset_operations, verbose = false } = options;
+	const { log, ops = default_changeset_operations, verbose = false, registry } = options;
 	log?.info(st('cyan', 'Generating publishing plan...'));
 
 	const warnings: Array<string> = [];
@@ -169,7 +184,7 @@ export const generate_publishing_plan = async (
 
 	// Publishing concerns only npm packages. Non-npm repos (e.g. Rust cargo repos) are
 	// loaded for the dashboard but have no npm identity in the changeset cascade — drop them
-	// before building the graph so they never appear in the plan or publishing order.
+	// before building the graph so they never appear in the plan.
 	const non_npm_repos = all_repos.filter((r) => !repo_is_npm(r));
 	if (non_npm_repos.length > 0) {
 		info.push(
@@ -181,15 +196,13 @@ export const generate_publishing_plan = async (
 
 	// Build dependency graph and validate; cycles and a failed sort are reported, never thrown
 	const validation = validate_dependency_graph(repos);
-	const { publishing_order, production_cycles, dev_cycles, graph } = validation;
+	const { order, production_cycles, dev_cycles, graph } = validation;
 	if (validation.sort_error) {
 		errors.push(validation.sort_error);
 	}
-
 	for (const cycle of production_cycles) {
 		errors.push(`Production dependency cycle: ${cycle.join(' → ')}`);
 	}
-
 	// Dev cycles are shown in gitops_analyze, not repeated here
 	if (dev_cycles.length > 0) {
 		info.push(
@@ -197,56 +210,116 @@ export const generate_publishing_plan = async (
 		);
 	}
 
-	// Checked once per repo; the initial pass and the no-changes list both read it.
 	const changeset_presence: Map<string, ChangesetPresence> = new Map(
 		await Promise.all(
 			repos.map(async (repo) => [repo.library.name, await ops.has_changesets({ repo })] as const)
 		)
 	);
-
-	const state: CascadeState = {
-		version_changes: [],
-		predicted_versions: new Map(),
-		breaking_packages: new Set()
-	};
-
-	const { changeset_details, repos_without_bump } = await plan_initial_pass({
-		repos,
-		publishing_order,
-		changeset_presence,
-		state,
-		ops,
-		log,
-		verbose,
-		warnings,
-		errors
-	});
-
-	const cascade = plan_resolve_cascades({ repos, state, changeset_details, verbose });
-
-	// Worded after the cascades, which may give such a repo an auto-changeset
-	for (const repo of repos_without_bump) {
-		const publishes = state.version_changes.some((vc) => vc.package_name === repo.library.name);
-		warnings.push(await describe_changesets_without_bump(repo, publishes, ops));
-	}
-
-	if (!cascade.converged) {
-		const convergence_warning = plan_convergence_warning(repos, state);
-		if (convergence_warning) warnings.push(convergence_warning);
-	}
-
-	// Final dependency updates calculation after convergence
-	const { dependency_updates, breaking_cascades } = calculate_dependency_updates(
-		repos,
-		state.predicted_versions,
-		state.breaking_packages
+	const repo_by_name: Map<string, LocalRepo> = new Map(repos.map((r) => [r.library.name, r]));
+	// one the registry has never seen that some package depends on is a first publish
+	// still propagating (npm answers E404 until it shows), or one that failed: never an app
+	const prod_peer_dependencies: Set<string> = new Set(
+		order.flatMap((name) => graph.get_prod_peer_dependencies(name))
 	);
 
-	// Packages with nothing to publish: no version change and no changesets
+	// each package's version after the release: predicted when it publishes, else current
+	const targets: Map<string, string> = new Map();
+	const changes: Map<string, VersionChange> = new Map();
+	const version_changes: Array<VersionChange> = [];
+	const awaiting_registry: Array<AwaitingRegistry> = [];
+	const never_published: Array<string> = [];
+	const repos_without_bump: Array<LocalRepo> = [];
+	const changeset_details: Array<VerboseChangesetDetail> = [];
+
+	for (const name of order) {
+		const repo = repo_by_name.get(name);
+		if (!repo) continue;
+		const current = repo.package_json.version || '0.0.0';
+		const presence = changeset_presence.get(name);
+		const has_own_changesets = presence?.ok === true && presence.value;
+
+		// Private packages never publish: no version change, and no target, so their
+		// dependents never move for them. Their own ranges still update (an update-only leaf).
+		if (repo.package_json.private) {
+			if (has_own_changesets) {
+				warnings.push(`${name} is private — its changeset(s) will not be published`);
+			}
+			continue;
+		}
+
+		let explicit: { version: string; bump_type: BumpType } | null = null;
+		if (presence && !presence.ok) {
+			errors.push(`Failed to check changesets for ${name}: ${presence.message}`);
+		} else if (has_own_changesets) {
+			const prediction = await ops.predict_next_version({ repo, log });
+			if (!prediction) {
+				// changeset files exist, but none yields a bump for this package
+				repos_without_bump.push(repo);
+			} else if (!prediction.ok) {
+				errors.push(`Failed to predict version for ${name}: ${prediction.message}`);
+			} else {
+				explicit = { version: prediction.version, bump_type: prediction.bump_type };
+				if (verbose) {
+					const detail = await read_changeset_detail(repo, prediction.bump_type, ops, log);
+					if (detail) changeset_details.push(detail);
+				}
+			}
+		}
+
+		// every prod/peer dependency precedes this package in `order`, so its target is final
+		const updates = to_dependency_updates(repo, targets, changes, [
+			'dependencies',
+			'peerDependencies'
+		]);
+
+		// what the registry shows matters only for a current version with nothing to publish over it
+		const shown = has_own_changesets ? undefined : registry?.get(name);
+		if (shown === 'unknown' && !prod_peer_dependencies.has(name)) {
+			// never published and nothing of its own to publish — an app or site, most likely: an
+			// update-only leaf like a private package, with no auto-bump to schedule a first publish,
+			// and no target, so no dependent's range moves to a version that was never published
+			never_published.push(name);
+			continue;
+		}
+		const change = to_version_change(name, current, explicit, to_required_bump(current, updates));
+		if (change) {
+			version_changes.push(change);
+			changes.set(name, change);
+			targets.set(name, change.to);
+		} else {
+			targets.set(name, current);
+		}
+		if (shown === 'unlisted' || shown === 'unknown') {
+			awaiting_registry.push({ name, version: current });
+		}
+	}
+
+	// Worded once the cascade settled whether each such repo publishes
+	for (const repo of repos_without_bump) {
+		warnings.push(
+			await describe_changesets_without_bump(repo, changes.has(repo.library.name), ops)
+		);
+	}
+
+	// the final updates over every section, in config order; the prod/peer ones match the pass
+	const { dependency_updates, breaking_cascades } = calculate_dependency_updates(
+		repos,
+		targets,
+		changes
+	);
+
+	const waves = group_into_levels(
+		order,
+		(name) => graph.get_prod_peer_dependencies(name),
+		new Set(changes.keys()),
+		to_rank(repos.map((r) => r.library.name))
+	);
+
+	const not_out = new Set([...awaiting_registry.map((a) => a.name), ...never_published]);
 	const no_changes: Array<string> = [];
 	for (const repo of repos) {
 		const name = repo.library.name;
-		if (state.version_changes.some((vc) => vc.package_name === name)) continue;
+		if (changes.has(name) || not_out.has(name)) continue;
 		const presence = changeset_presence.get(name);
 		if (presence?.ok && !presence.value) {
 			no_changes.push(name);
@@ -256,22 +329,22 @@ export const generate_publishing_plan = async (
 	const verbose_data = verbose
 		? plan_verbose_data({
 				graph,
-				version_changes: state.version_changes,
+				version_changes,
 				dependency_updates,
 				breaking_cascades,
 				changeset_details,
-				iterations: cascade.verbose_iterations,
-				total_iterations: cascade.iterations,
 				prod_cycle_count: production_cycles.length,
 				dev_cycle_count: dev_cycles.length
 			})
 		: undefined;
 
 	return {
-		publishing_order,
-		version_changes: state.version_changes,
+		waves,
+		version_changes,
 		dependency_updates,
 		breaking_cascades,
+		awaiting_registry,
+		never_published,
 		warnings,
 		info,
 		no_changes,
@@ -280,122 +353,86 @@ export const generate_publishing_plan = async (
 	};
 };
 
-interface PlanInitialPassOptions {
-	repos: Array<LocalRepo>;
-	publishing_order: Array<string>;
-	changeset_presence: Map<string, ChangesetPresence>;
-	state: CascadeState;
-	ops: ChangesetOperations;
-	log: Logger | undefined;
-	verbose: boolean;
-	warnings: Array<string>;
-	errors: Array<string>;
-}
+type ChangesetPresence = Awaited<ReturnType<ChangesetOperations['has_changesets']>>;
 
-interface PlanInitialPassResult {
-	/** The changeset details for verbose output, empty unless `verbose`. */
-	changeset_details: Array<VerboseChangesetDetail>;
-	/**
-	 * Repos whose changeset files yield no bump for their package, warned on
-	 * once the cascades settle whether each publishes.
-	 */
-	repos_without_bump: Array<LocalRepo>;
-}
+/** The bump a package's prod/peer updates require, or `null` with none. */
+const to_required_bump = (
+	current: string,
+	updates: ReadonlyArray<DependencyUpdate>
+): BumpType | null =>
+	updates.length > 0
+		? required_bump_for_dependency_update(
+				current,
+				updates.some((u) => u.breaking)
+			)
+		: null;
 
 /**
- * The initial pass: a version change for each package with explicit changesets,
- * in publishing order.
+ * A package's version change from its own changesets (`explicit`) and the bump
+ * its dependency updates require: the changesets' bump, escalated when the
+ * required one is larger, or an auto-changeset bump when it has none.
  *
- * @mutates options.state - adds the explicit version changes, their predicted versions, and the breaking ones
- * @mutates options.warnings - private packages carrying changesets
- * @mutates options.errors - failed changeset checks and predictions
+ * @returns the change, or `null` when the package has neither
  */
-const plan_initial_pass = async (
-	options: PlanInitialPassOptions
-): Promise<PlanInitialPassResult> => {
-	const { repos, publishing_order, changeset_presence, state, ops, log, verbose } = options;
-	const { warnings, errors } = options;
-	const changeset_details: Array<VerboseChangesetDetail> = [];
-	const repos_without_bump: Array<LocalRepo> = [];
-
-	for (const pkg_name of publishing_order) {
-		const repo = repos.find((r) => r.library.name === pkg_name);
-		if (!repo) continue;
-		const has_result = changeset_presence.get(pkg_name);
-		if (!has_result) continue;
-
-		// Private packages never publish — exclude them from version changes entirely (no
-		// publish step, npm-wait, bump escalation, or auto-changeset). They keep their slot in
-		// the topological order. Flag a private package that carries a changeset, since that
-		// changeset can't be published.
-		if (repo.package_json.private) {
-			if (has_result.ok && has_result.value) {
-				warnings.push(`${pkg_name} is private — its changeset(s) will not be published`);
-			}
-			continue;
+const to_version_change = (
+	package_name: string,
+	from: string,
+	explicit: { version: string; bump_type: BumpType } | null,
+	required: BumpType | null
+): VersionChange | null => {
+	if (explicit) {
+		if (required && compare_bump_types(required, explicit.bump_type) > 0) {
+			return {
+				package_name,
+				from,
+				to: calculate_next_version(from, required),
+				bump_type: required,
+				breaking: is_breaking_change(from, required),
+				has_changesets: true,
+				needs_bump_escalation: true,
+				existing_bump: explicit.bump_type,
+				required_bump: required
+			};
 		}
-
-		if (!has_result.ok) {
-			errors.push(`Failed to check changesets for ${pkg_name}: ${has_result.message}`);
-			continue;
-		}
-
-		if (!has_result.value) continue;
-
-		// Predict version from changesets
-		const prediction = await ops.predict_next_version({ repo, log });
-
-		if (!prediction) {
-			// Changeset files exist, but none yields a bump for this package
-			repos_without_bump.push(repo);
-			continue;
-		}
-
-		if (!prediction.ok) {
-			errors.push(`Failed to predict version for ${pkg_name}: ${prediction.message}`);
-			continue;
-		}
-
-		// Capture changeset details for verbose output
-		if (verbose) {
-			const changesets_result = await ops.read_changesets({ repo, log });
-			if (changesets_result.ok) {
-				const files = changesets_result.value
-					.filter((cs) => cs.packages.some((p) => p.name === pkg_name))
-					.map((cs) => {
-						const pkg_entry = cs.packages.find((p) => p.name === pkg_name);
-						return {
-							filename: cs.filename,
-							bump_type: pkg_entry?.bump_type || prediction.bump_type,
-							summary: cs.summary
-						};
-					});
-				if (files.length > 0) {
-					changeset_details.push({ package_name: pkg_name, files });
-				}
-			}
-		}
-
-		const old_version = repo.package_json.version || '0.0.0';
-		const is_breaking = is_breaking_change(old_version, prediction.bump_type);
-
-		state.predicted_versions.set(pkg_name, prediction.version);
-
-		if (is_breaking) {
-			state.breaking_packages.add(pkg_name);
-		}
-
-		state.version_changes.push({
-			package_name: pkg_name,
-			from: old_version,
-			to: prediction.version,
-			bump_type: prediction.bump_type,
-			breaking: is_breaking,
+		return {
+			package_name,
+			from,
+			to: explicit.version,
+			bump_type: explicit.bump_type,
+			breaking: is_breaking_change(from, explicit.bump_type),
 			has_changesets: true
-		});
+		};
 	}
+	if (!required) return null;
+	return {
+		package_name,
+		from,
+		to: calculate_next_version(from, required),
+		bump_type: required,
+		breaking: is_breaking_change(from, required),
+		has_changesets: false,
+		will_generate_changeset: true
+	};
+};
 
-	return { changeset_details, repos_without_bump };
+/** The changeset files naming a package, for verbose output. */
+const read_changeset_detail = async (
+	repo: LocalRepo,
+	predicted_bump: BumpType,
+	ops: ChangesetOperations,
+	log: Logger | undefined
+): Promise<VerboseChangesetDetail | null> => {
+	const pkg_name = repo.library.name;
+	const read = await ops.read_changesets({ repo, log });
+	if (!read.ok) return null;
+	const files = read.value
+		.filter((cs) => cs.packages.some((p) => p.name === pkg_name))
+		.map((cs) => ({
+			filename: cs.filename,
+			bump_type: cs.packages.find((p) => p.name === pkg_name)?.bump_type ?? predicted_bump,
+			summary: cs.summary
+		}));
+	return files.length > 0 ? { package_name: pkg_name, files } : null;
 };
 
 /**
@@ -428,235 +465,20 @@ const describe_changesets_without_bump = async (
 	);
 };
 
-interface PlanResolveCascadesOptions {
-	repos: Array<LocalRepo>;
-	state: CascadeState;
-	changeset_details: Array<VerboseChangesetDetail>;
-	verbose: boolean;
-}
-
-interface PlanCascadeResult {
-	/** Iterations run, at most `GITOPS_MAX_ITERATIONS_DEFAULT`. */
-	iterations: number;
-	/** False when the last iteration still found changes. */
-	converged: boolean;
-	/** Per-iteration details, empty unless `verbose`. */
-	verbose_iterations: Array<VerboseIteration>;
-}
-
-/**
- * Fixed-point iteration over the dependency updates the current predictions
- * imply: escalates explicit changes a breaking dependency outgrows, and adds or
- * raises auto-changeset changes for dependents, until a pass finds nothing new.
- *
- * @mutates options.state - escalates and adds version changes, with their predicted versions and breaking set
- */
-const plan_resolve_cascades = (options: PlanResolveCascadesOptions): PlanCascadeResult => {
-	const { repos, state, changeset_details, verbose } = options;
-	const { version_changes, predicted_versions, breaking_packages } = state;
-	const verbose_iterations: Array<VerboseIteration> = [];
-
-	let iteration = 0;
-	let changed = true;
-
-	while (changed && iteration < GITOPS_MAX_ITERATIONS_DEFAULT) {
-		changed = false;
-		iteration++;
-
-		// Verbose iteration tracking
-		const verbose_iteration_packages: Array<VerboseIterationPackage> = [];
-		let verbose_new_changes = 0;
-
-		// Recalculate dependency updates based on current predicted versions
-		// (breaking_cascades not needed during iteration, only calculated at the end)
-		const { dependency_updates } = calculate_dependency_updates(
-			repos,
-			predicted_versions,
-			breaking_packages
-		);
-
-		// Process packages to check for bump escalation and auto-generated changesets
-		for (const repo of repos) {
-			const pkg_name = repo.library.name;
-
-			// Private packages are excluded from version changes (they never publish), so they
-			// never escalate or auto-generate a changeset.
-			if (repo.package_json.private) continue;
-
-			// Get required bump from dependencies
-			const required_bump = get_required_bump_for_dependencies(
-				repo,
-				dependency_updates,
-				breaking_packages
-			);
-			if (!required_bump) continue;
-
-			// Find triggering dependency for verbose output
-			let triggering_dep: string | null = null;
-			const relevant_updates = dependency_updates.filter(
-				(u) =>
-					u.dependent_package === pkg_name &&
-					(u.type === 'dependencies' || u.type === 'peerDependencies') &&
-					breaking_packages.has(u.updated_dependency)
-			);
-			if (relevant_updates.length > 0) {
-				triggering_dep = `${relevant_updates[0]!.updated_dependency} BREAKING`;
-			}
-
-			const old_version = repo.package_json.version || '0.0.0';
-			const new_version = calculate_next_version(old_version, required_bump);
-			const is_breaking = is_breaking_change(old_version, required_bump);
-
-			const existing_entry = version_changes.find((vc) => vc.package_name === pkg_name);
-
-			if (existing_entry) {
-				// Dependencies may require a larger bump than the entry has. Only mark as
-				// changed if the version actually changes.
-				if (compare_bump_types(required_bump, existing_entry.bump_type) <= 0) continue;
-				if (existing_entry.to === new_version) continue;
-
-				changed = true;
-				verbose_new_changes++;
-
-				// An auto-changeset entry raised by a dependency that turned breaking later in the
-				// iteration (a dependent listed before its dependency) is still an auto-changeset:
-				// the executor generates its changeset at the bump the plan settles on. Only an
-				// entry with changesets of its own escalates.
-				const kind = version_change_kind(existing_entry);
-
-				if (verbose) {
-					const changeset_detail = changeset_details.find((d) => d.package_name === pkg_name);
-					verbose_iteration_packages.push({
-						name: pkg_name,
-						changeset_count: kind === 'auto' ? 0 : changeset_detail?.files.length || 1,
-						bump_from_changesets: kind === 'auto' ? null : existing_entry.bump_type,
-						required_bump,
-						triggering_dep,
-						action: kind === 'auto' ? 'auto_changeset' : 'escalation',
-						version_to: new_version,
-						is_breaking
-					});
-				}
-
-				if (kind !== 'auto') {
-					existing_entry.needs_bump_escalation = true;
-					existing_entry.existing_bump ??= existing_entry.bump_type;
-					existing_entry.required_bump = required_bump;
-				}
-				existing_entry.bump_type = required_bump;
-				existing_entry.to = new_version;
-				existing_entry.breaking = is_breaking;
-
-				predicted_versions.set(pkg_name, new_version);
-				if (is_breaking) {
-					breaking_packages.add(pkg_name);
-				}
-			} else if (!predicted_versions.has(pkg_name)) {
-				// No existing changesets but needs changeset for dependency updates
-				changed = true;
-				verbose_new_changes++;
-
-				if (verbose) {
-					verbose_iteration_packages.push({
-						name: pkg_name,
-						changeset_count: 0,
-						bump_from_changesets: null,
-						required_bump,
-						triggering_dep,
-						action: 'auto_changeset',
-						version_to: new_version,
-						is_breaking
-					});
-				}
-
-				if (is_breaking) {
-					breaking_packages.add(pkg_name);
-				}
-
-				version_changes.push({
-					package_name: pkg_name,
-					from: old_version,
-					to: new_version,
-					bump_type: required_bump,
-					breaking: is_breaking,
-					has_changesets: false,
-					will_generate_changeset: true
-				});
-
-				predicted_versions.set(pkg_name, new_version);
-			}
-		}
-
-		// Store verbose iteration data
-		if (verbose && (verbose_iteration_packages.length > 0 || iteration === 1)) {
-			verbose_iterations.push({
-				iteration,
-				packages: verbose_iteration_packages,
-				new_changes: verbose_new_changes
-			});
-		}
-	}
-
-	return { iterations: iteration, converged: !changed, verbose_iterations };
-};
-
-/**
- * Words the warning for a plan that hit `GITOPS_MAX_ITERATIONS_DEFAULT` still
- * changing, naming the packages one more pass would change.
- *
- * @returns the warning, or `null` when one more pass would change nothing (the last pass converged it)
- */
-const plan_convergence_warning = (repos: Array<LocalRepo>, state: CascadeState): string | null => {
-	const { version_changes, predicted_versions, breaking_packages } = state;
-	const pending_packages: Array<string> = [];
-
-	// Recalculate one more time to see what's pending
-	const { dependency_updates: pending_updates } = calculate_dependency_updates(
-		repos,
-		predicted_versions,
-		breaking_packages
-	);
-
-	for (const repo of repos) {
-		const pkg_name = repo.library.name;
-		if (repo.package_json.private) continue; // private packages never publish
-		const required_bump = get_required_bump_for_dependencies(
-			repo,
-			pending_updates,
-			breaking_packages
-		);
-		if (!required_bump) continue;
-
-		const existing_entry = version_changes.find((vc) => vc.package_name === pkg_name);
-		if (!existing_entry || compare_bump_types(required_bump, existing_entry.bump_type) > 0) {
-			pending_packages.push(pkg_name);
-		}
-	}
-
-	if (pending_packages.length === 0) return null;
-
-	return (
-		`Reached maximum iterations (${GITOPS_MAX_ITERATIONS_DEFAULT}) without full convergence - ` +
-		`${pending_packages.length} package(s) may still need processing: ${pending_packages.join(', ')}.`
-	);
-};
-
 interface PlanVerboseDataOptions {
 	graph: DependencyGraph;
 	version_changes: Array<VersionChange>;
 	dependency_updates: Array<DependencyUpdate>;
 	breaking_cascades: Map<string, Array<string>>;
 	changeset_details: Array<VerboseChangesetDetail>;
-	iterations: Array<VerboseIteration>;
-	total_iterations: number;
 	prod_cycle_count: number;
 	dev_cycle_count: number;
 }
 
 /**
  * Assembles the verbose diagnostics: propagation chains from the breaking
- * cascades and a summary of the dependency graph, beside the changeset and
- * iteration details the passes collected.
+ * cascades and a summary of the dependency graph, beside the changeset
+ * details the pass collected.
  */
 const plan_verbose_data = (options: PlanVerboseDataOptions): VerboseData => {
 	const { graph, version_changes, dependency_updates, breaking_cascades } = options;
@@ -666,7 +488,6 @@ const plan_verbose_data = (options: PlanVerboseDataOptions): VerboseData => {
 	for (const [source, affected] of breaking_cascades) {
 		const dependents: VerbosePropagation['dependents'] = [];
 		for (const pkg of affected) {
-			// Determine dep type and action
 			const update = dependency_updates.find(
 				(u) => u.dependent_package === pkg && u.updated_dependency === source
 			);
@@ -707,7 +528,6 @@ const plan_verbose_data = (options: PlanVerboseDataOptions): VerboseData => {
 
 	return {
 		changeset_details: options.changeset_details,
-		iterations: options.iterations,
 		propagations,
 		graph_summary: {
 			package_count: graph.nodes.size,
@@ -716,7 +536,6 @@ const plan_verbose_data = (options: PlanVerboseDataOptions): VerboseData => {
 			dev_edges,
 			prod_cycle_count: options.prod_cycle_count,
 			dev_cycle_count: options.dev_cycle_count
-		},
-		total_iterations: options.total_iterations
+		}
 	};
 };

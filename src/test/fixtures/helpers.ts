@@ -2,12 +2,12 @@ import type { VersionChange } from '#lib/publishing_plan.ts';
 import type { RepoFixtureExpectedVersionChange } from './repo_fixture_types.ts';
 
 /**
- * Assert that publishing order matches expected order.
+ * Assert that a topological order matches the expected one.
  */
-export const assert_publishing_order = (actual: Array<string>, expected: Array<string>): void => {
+export const assert_order = (actual: Array<string>, expected: Array<string>): void => {
 	if (actual.length !== expected.length) {
 		throw new Error(
-			`Publishing order length mismatch: expected ${expected.length} packages, got ${actual.length}.\n` +
+			`Order length mismatch: expected ${expected.length} packages, got ${actual.length}.\n` +
 				`Expected: ${expected.join(', ')}\n` +
 				`Actual: ${actual.join(', ')}`
 		);
@@ -16,7 +16,7 @@ export const assert_publishing_order = (actual: Array<string>, expected: Array<s
 	for (let i = 0; i < expected.length; i++) {
 		if (actual[i] !== expected[i]) {
 			throw new Error(
-				`Publishing order mismatch at position ${i + 1}:\n` +
+				`Order mismatch at position ${i + 1}:\n` +
 					`Expected: ${expected[i]}\n` +
 					`Actual: ${actual[i]}\n` +
 					`Full expected: ${expected.join(', ')}\n` +

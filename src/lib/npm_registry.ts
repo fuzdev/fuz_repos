@@ -3,6 +3,13 @@ import { spawn_out } from '@fuzdev/fuz_util/process.ts';
 import { wait } from '@fuzdev/fuz_util/async.ts';
 import { styleText as st } from 'node:util';
 
+/**
+ * What the registry shows for one package version: the version is `listed`,
+ * the package is known but the version `unlisted` (still propagating, or never
+ * published), or the package itself is `unknown` (never published at all).
+ */
+export type RegistryVersion = 'listed' | 'unlisted' | 'unknown';
+
 export interface WaitOptions {
 	log?: Logger;
 	max_attempts?: number;

@@ -16,7 +16,6 @@ import {
 	type DependencyUpdate,
 	type VerboseData,
 	type VerboseChangesetDetail,
-	type VerboseIteration,
 	type VerbosePropagation,
 	type VerboseGraphSummary
 } from './publishing_plan.ts';
@@ -25,13 +24,21 @@ import { to_updated_range, type VersionStrategy } from './version_utils.ts';
 export interface LogPlanOptions {
 	verbose?: boolean;
 	/**
-	 * The prefix strategy the executor rewrites unprefixed ranges with, so the diffs show
+	 * The prefix strategy the release step rewrites unprefixed ranges with, so the diffs show
 	 * what it writes. `gitops_plan` and `gitops_validate` take no strategy and show the default.
 	 */
 	version_strategy?: VersionStrategy;
 }
 
 const SEPARATOR = '────────────────────────────────────────';
+
+/**
+ * Formats waves as one line each, numbered from 1: `1. a, b`.
+ *
+ * @param waves - the plan's waves, shallowest first
+ */
+export const format_waves = (waves: ReadonlyArray<ReadonlyArray<string>>): Array<string> =>
+	waves.map((wave, i) => `${i + 1}. ${wave.join(', ')}`);
 
 /**
  * Logs a section header with separators.
@@ -50,7 +57,7 @@ export const to_dependency_type_label = (
 
 /**
  * Formats a package's dependency updates as diff-style lines, one `-`/`+` pair
- * per entry, each section labeled. The `+` side is the range the executor
+ * per entry, each section labeled. The `+` side is the range the release step
  * writes (`to_updated_range`), its prefix kept.
  *
  * @param style - `color` for a publishing package, `dim` for one that doesn't republish
@@ -146,8 +153,8 @@ const log_version_change_with_diffs = (
 /**
  * Logs a complete publishing plan to the console.
  *
- * Displays errors, publishing order, version changes grouped by scenario,
- * dependency-only updates, warnings, and a summary.
+ * Displays errors, the waves, version changes grouped by scenario,
+ * dependency-only updates, packages awaiting the registry, warnings, and a summary.
  */
 export const log_publishing_plan = (
 	plan: PublishingPlan,
@@ -155,10 +162,12 @@ export const log_publishing_plan = (
 	options: LogPlanOptions = {}
 ): void => {
 	const {
-		publishing_order,
+		waves,
 		version_changes,
 		dependency_updates,
 		breaking_cascades,
+		awaiting_registry,
+		never_published,
 		warnings,
 		info,
 		no_changes,
@@ -174,21 +183,22 @@ export const log_publishing_plan = (
 		log.info('');
 	}
 
-	// Publishing order
-	if (publishing_order.length > 0) {
-		log.info(st('cyan', 'Publishing Order:'));
-		log.info(`  ${publishing_order.join(' → ')}`);
+	// Waves: each line publishes together, after the lines above it
+	if (waves.length > 0) {
+		log.info(st('cyan', 'Waves (each publishes together, after the ones above):'));
+		for (const line of format_waves(waves)) {
+			log.info(`  ${line}`);
+		}
 		log.info('');
 	}
 
 	// Version changes with diffs
 	if (version_changes.length > 0) {
-		// Sort by publishing order
-		const ordered_changes = [...version_changes].sort((a, b) => {
-			const idx_a = publishing_order.indexOf(a.package_name);
-			const idx_b = publishing_order.indexOf(b.package_name);
-			return idx_a - idx_b;
-		});
+		// in wave order
+		const flat = waves.flat();
+		const ordered_changes = [...version_changes].sort(
+			(a, b) => flat.indexOf(a.package_name) - flat.indexOf(b.package_name)
+		);
 
 		// Separate into groups for headers; each change lands in exactly one
 		const with_changesets = ordered_changes.filter((vc) => version_change_kind(vc) === 'explicit');
@@ -258,6 +268,15 @@ export const log_publishing_plan = (
 		log.info('');
 	}
 
+	// Released but not yet visible: their dependents wait on the registry
+	if (awaiting_registry.length > 0) {
+		log.warn(st('yellow', 'Awaiting the registry (still propagating, or not published):'));
+		for (const { name, version } of awaiting_registry) {
+			log.warn(`  ${name}@${version}`);
+		}
+		log.info('');
+	}
+
 	// Warnings
 	if (warnings.length > 0) {
 		log.warn(st('yellow', 'Warnings:'));
@@ -275,7 +294,10 @@ export const log_publishing_plan = (
 	if (no_changes.length > 0) {
 		log.info(st('dim', `Nothing to publish: ${no_changes.join(', ')}`));
 	}
-	if (info.length > 0 || no_changes.length > 0) {
+	if (never_published.length > 0) {
+		log.info(st('dim', `Never published, with nothing to publish: ${never_published.join(', ')}`));
+	}
+	if (info.length > 0 || no_changes.length > 0 || never_published.length > 0) {
 		log.info('');
 	}
 
@@ -315,7 +337,6 @@ const log_verbose = (data: VerboseData, log: Logger): void => {
 	log.info(''); // Blank line before verbose sections
 
 	log_verbose_changeset_details(data.changeset_details, log);
-	log_verbose_iteration_details(data.iterations, data.total_iterations, log);
 	log_verbose_propagations(data.propagations, log);
 	log_verbose_graph_summary(data.graph_summary, log);
 };
@@ -342,71 +363,6 @@ const log_verbose_changeset_details = (
 			log.info(st('dim', `  .changeset/${file.filename} (${file.bump_type})${summary_text}`));
 		}
 	}
-	log.info('');
-};
-
-/**
- * Logs fixed-point iteration details.
- */
-const log_verbose_iteration_details = (
-	iterations: Array<VerboseIteration>,
-	total: number,
-	log: Logger
-): void => {
-	if (iterations.length === 0) return;
-
-	log_section_header('Fixed-Point Iteration', log);
-
-	for (const iter of iterations) {
-		if (iter.new_changes === 0 && iter.packages.length === 0) {
-			log.info(st('dim', `Iteration ${iter.iteration}:`));
-			log.info(st('dim', '  No new changes'));
-			continue;
-		}
-
-		log.info(st('dim', `Iteration ${iter.iteration}:`));
-		for (const pkg of iter.packages) {
-			const parts: Array<string> = [];
-
-			// Changeset info
-			if (pkg.changeset_count > 0) {
-				parts.push(`changesets=${pkg.changeset_count}`);
-				if (pkg.bump_from_changesets) {
-					parts.push(`bump=${pkg.bump_from_changesets}`);
-				}
-			} else {
-				parts.push('no changesets');
-			}
-
-			// Required bump from deps
-			if (pkg.required_bump && pkg.triggering_dep) {
-				parts.push(`required=${pkg.required_bump} (from ${pkg.triggering_dep})`);
-			}
-
-			// Action
-			if (pkg.action === 'auto_changeset') {
-				parts.push('→ auto-generate');
-			} else if (pkg.action === 'escalation') {
-				parts.push('→ escalation');
-			} else if (pkg.action === 'publish') {
-				// Regular publish, no special label needed
-			}
-
-			// Version
-			if (pkg.version_to) {
-				const breaking_label = pkg.is_breaking ? ' (BREAKING)' : '';
-				parts.push(`→ ${pkg.version_to}${breaking_label}`);
-			}
-
-			log.info(st('dim', `  ${pkg.name}: ${parts.join(', ')}`));
-		}
-
-		if (iter.new_changes > 0) {
-			log.info(st('dim', `  New changes: ${iter.new_changes}`));
-		}
-	}
-
-	log.info(st('dim', `Converged after ${total} iteration(s)`));
 	log.info('');
 };
 

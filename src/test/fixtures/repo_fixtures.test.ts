@@ -178,11 +178,11 @@ const test_fixture = async (fixture: RepoFixtureSet): Promise<void> => {
 
 	const plan = await generate_publishing_plan(repos, { ops });
 
-	// Check publishing order
+	// Check waves
 	assert.deepEqual(
-		plan.publishing_order,
-		fixture.expected_outcomes.publishing_order,
-		`${fixture.name}: Publishing order matches expected`
+		plan.waves,
+		fixture.expected_outcomes.waves,
+		`${fixture.name}: waves match expected`
 	);
 
 	// Check version changes

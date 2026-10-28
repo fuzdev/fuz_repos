@@ -2,7 +2,7 @@ import { assert, describe, test } from 'vitest';
 import * as s from '@fuzdev/fuz_schema/schema.ts';
 
 import {
-	check_publish_readiness,
+	check_release_readiness,
 	format_repo_readiness_problem,
 	repo_readiness_at_rest,
 	repo_readiness_for_publish
@@ -255,46 +255,21 @@ describe('repo_readiness_for_publish', () => {
 	});
 });
 
-describe('check_publish_readiness', () => {
+describe('check_release_readiness', () => {
 	const fetched = (entries: Array<ReposEntryStatus>) =>
 		create_mock_repos_report(entries, { fetched: true });
 
-	test('passes a ready set', () => {
-		const report = fetched([
-			create_mock_repos_entry({ key: 'a' }),
-			create_mock_repos_entry({ key: 'b' })
-		]);
-		assert.deepEqual(check_publish_readiness({ report, keys: ['a', 'b'] }), {
-			ok: true,
-			ahead: []
-		});
-	});
-
-	test('passes a repo ahead of origin, returning it with its count', () => {
+	test('nothing to report for a ready set, a repo ahead of origin included', () => {
 		const report = fetched([
 			create_mock_repos_entry({ key: 'a' }),
 			entry_with('b', { at_rest: { ...AT_REST, followed: { kind: 'ahead', commits: 2 } } })
 		]);
-		assert.deepEqual(check_publish_readiness({ report, keys: ['a', 'b'] }), {
-			ok: true,
-			ahead: [{ key: 'b', branch: 'main', commits: 2 }]
-		});
+		const checked = check_release_readiness({ report, keys: ['a', 'b'] });
+		assert.deepEqual(checked.global, []);
+		assert.deepEqual(checked.by_key, new Map());
 	});
 
-	test('a refusal still returns the ready repos ahead', () => {
-		const report = fetched([
-			entry_with('a', { at_rest: { ...AT_REST, followed: { kind: 'ahead', commits: 1 } } }),
-			entry_with('b', { at_rest: { ...AT_REST, followed: { kind: 'behind', commits: 1 } } })
-		]);
-		const checked = check_publish_readiness({ report, keys: ['a', 'b'] });
-		assert.ok(!checked.ok);
-		assert.deepEqual(checked.ahead, [{ key: 'a', branch: 'main', commits: 1 }]);
-		assert.deepEqual(checked.lines, [
-			'b: `main` is 1 commit behind origin — `repos sync b` fast-forwards it'
-		]);
-	});
-
-	test('refuses naming each repo, what is wrong, and the fix', () => {
+	test('names each not-ready repo, what is wrong, and the fix', () => {
 		const report = fetched([
 			entry_with('a', {
 				checkout: { head: { kind: 'branch', name: 'feature' } },
@@ -303,19 +278,12 @@ describe('check_publish_readiness', () => {
 			create_mock_repos_entry({ key: 'b' }),
 			entry_with('c', { at_rest: { ...AT_REST, followed: { kind: 'behind', commits: 2 } } })
 		]);
-		const checked = check_publish_readiness({ report, keys: ['a', 'b', 'c'] });
-		assert.ok(!checked.ok);
-		assert.deepEqual(
-			checked.not_ready.map((r) => r.key),
-			['a', 'c']
-		);
-		assert.include(checked.message, 'nothing was changed');
-		assert.include(checked.message, 'a: on `feature`, not `main` — switch to `main`');
-		assert.include(
-			checked.message,
-			'c: `main` is 2 commits behind origin — `repos sync c` fast-forwards it'
-		);
-		assert.notInclude(checked.message, 'b:');
+		const checked = check_release_readiness({ report, keys: ['a', 'b', 'c'] });
+		assert.deepEqual(Array.from(checked.by_key.keys()), ['a', 'c']);
+		assert.include(checked.by_key.get('a')![0], 'on `feature`, not `main` — switch to `main`');
+		assert.deepEqual(checked.by_key.get('c'), [
+			'`main` is 2 commits behind origin — `repos sync c` fast-forwards it'
+		]);
 	});
 
 	test('a dirty repo points at the troubleshooting doc, where a failed publish is covered', () => {
@@ -325,27 +293,24 @@ describe('check_publish_readiness', () => {
 				at_rest: { ...AT_REST, clean: false }
 			})
 		]);
-		const checked = check_publish_readiness({ report, keys: ['a'] });
-		assert.ok(!checked.ok);
-		assert.deepEqual(checked.lines, [
-			'a: uncommitted changes (1 staged) — commit, stash, or discard them (untracked files count) — after a failed publish, see the troubleshooting doc first'
+		assert.deepEqual(check_release_readiness({ report, keys: ['a'] }).by_key.get('a'), [
+			'uncommitted changes (1 staged) — commit, stash, or discard them (untracked files count) — after a failed `gro publish`, see the troubleshooting doc first'
 		]);
 	});
 
-	test('refuses a key the report lacks', () => {
-		const checked = check_publish_readiness({ report: fetched([]), keys: ['a'] });
-		assert.ok(!checked.ok);
-		assert.include(checked.message, "a: can't be read: not in the `repos status` report");
+	test('a key the report lacks is not ready', () => {
+		const checked = check_release_readiness({ report: fetched([]), keys: ['a'] });
+		assert.include(checked.by_key.get('a')![0], "can't be read: not in the `repos status` report");
 	});
 
-	test('refuses a report that was not fetched', () => {
+	test('a report that was not fetched holds every repo', () => {
 		const report = create_mock_repos_report([create_mock_repos_entry({ key: 'a' })]);
-		const checked = check_publish_readiness({ report, keys: ['a'] });
-		assert.ok(!checked.ok);
-		assert.include(checked.message, "wasn't fetched");
+		const checked = check_release_readiness({ report, keys: ['a'] });
+		assert.strictEqual(checked.global.length, 1);
+		assert.include(checked.global[0], "wasn't fetched");
 	});
 
-	test('refuses when busy detection is unavailable, for each golden reason', () => {
+	test('busy detection unavailable holds every repo, for each golden reason', () => {
 		const sessions = s.parse_or_throw(s.array(ReposSessions), load_golden('sessions.json'));
 		const unavailable = sessions.filter((session) => session.kind === 'unavailable');
 		assert.ok(unavailable.length > 0);
@@ -354,9 +319,8 @@ describe('check_publish_readiness', () => {
 				fetched: true,
 				sessions: session
 			});
-			const checked = check_publish_readiness({ report, keys: ['a'] });
-			assert.ok(!checked.ok);
-			assert.include(checked.message, 'busy detection is unavailable');
+			const checked = check_release_readiness({ report, keys: ['a'] });
+			assert.include(checked.global.join('\n'), 'busy detection is unavailable');
 		}
 	});
 });

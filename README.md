@@ -78,8 +78,8 @@ npm i -D @fuzdev/fuz_repos
   // gitops_plan.task.ts
   export * from '@fuzdev/fuz_repos/gitops_plan.task.ts';
 
-  // gitops_publish.task.ts
-  export * from '@fuzdev/fuz_repos/gitops_publish.task.ts';
+  // gitops_release.task.ts
+  export * from '@fuzdev/fuz_repos/gitops_release.task.ts';
 
   // gitops_validate.task.ts
   export * from '@fuzdev/fuz_repos/gitops_validate.task.ts';
@@ -137,11 +137,10 @@ one behind origin.
 ### Diagnostic commands (read-only)
 
 ```bash
-gro gitops_validate           # run all validation checks (analyze + plan + dry run + CI reconcile)
-gro gitops_analyze            # analyze dependency graph and detect cycles
-gro gitops_plan               # generate publishing plan showing version changes and cascades
-gro gitops_publish            # simulate publishing, writing nothing in git (dry run default)
-gro gitops_publish --preview  # show the ordered side-effects a --wetrun would perform
+gro gitops_validate           # run all validation checks (analyze + plan + CI reconcile)
+gro gitops_analyze            # analyze dependency graph, levels, and cycles
+gro gitops_plan               # the release's waves, version changes, and cascades, offline
+gro gitops_release            # preview a release step: the rewrites it would commit and the wave to publish
 ```
 
 These read each repo's working tree exactly as it sits on disk — no branch
@@ -151,24 +150,24 @@ aren't at rest (off their registry branch, dirty, mid-rebase, or not in sync
 with origin as of the last fetch); run `repos sync` first to read them at
 rest.
 
-### Publishing packages
+### Releasing packages
+
+A release publishes in waves — a wave's packages don't depend on each other —
+and the publishing is yours: `gro publish` in each repo, inside one npm 2FA
+window. The tool steps between waves:
 
 ```bash
-gro gitops_publish --wetrun  # publish every package the plan publishes, in dependency order
-gro gitops_publish --wetrun --no-plan  # skip plan confirmation
+gro gitops_release --wetrun         # rewrite released dependencies' dependents, name the wave to publish
+# publish the wave it names
+gro gitops_release --wetrun --wait  # wait out the registry, then the same for the next wave
 ```
 
-Before it shows the plan for confirmation, a real publish fetches every npm repo
-(`repos status --fetch`) and refuses unless each is on its registry branch,
-clean, idle, and in sync with origin or ahead of it, with no other live
-session in its checkout — naming each problem and its fix. It moves nothing to
-get there, and re-checks each repo the same way right before publishing it.
-
-**Note:** If publishing fails, simply re-run the same command.
-Already-published packages are automatically skipped (changesets consumed),
-failed packages retried naturally (see
-[docs/publishing.md](docs/publishing.md#readiness) for what the run leaves
-unpushed).
+Each step derives where the release stands from what it observes — changesets,
+each `package.json`, and what the registry shows — so it keeps no state and
+picks up wherever things are, a release made by hand included. It fetches the
+repos first and holds a rewrite or publish in one that isn't on its registry
+branch, clean, idle, and in sync with origin or ahead of it, naming the fix;
+it moves no repo to get there (see [docs/publishing.md](docs/publishing.md)).
 
 ### The `repos` tool
 
@@ -191,7 +190,7 @@ repos push            # push the branch checked out here, as a fast-forward (reb
 **Documentation:**
 
 - ./CLAUDE.md - Architecture, commands, testing patterns
-- ./docs/publishing.md - Publishing workflows, changeset
+- ./docs/publishing.md - The release step, changeset
   semantics, examples
 - ./docs/troubleshooting.md - Common errors and
   debugging tips

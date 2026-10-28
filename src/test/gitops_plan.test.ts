@@ -41,7 +41,7 @@ describe('run_gitops_plan machine output', () => {
 		await run_gitops_plan(s.parse_or_throw(Args, { format: 'json' }), log, create_deps());
 		assert.strictEqual(log.stdout.length, 1);
 		const plan = JSON.parse(log.stdout[0]!);
-		assert.deepEqual(plan.publishing_order, ['a', 'b']);
+		assert.deepEqual(plan.waves, [['a'], ['b']]);
 		// the progress lines and the readiness block went to stderr
 		const errors = log.stderr.join('\n');
 		assert.include(errors, 'Generating multi-repo publishing plan');
@@ -67,7 +67,7 @@ describe('run_gitops_plan machine output', () => {
 			);
 			assert.ok(log.stdout.some((l) => l.includes('Generating multi-repo publishing plan')));
 			assert.ok(log.stdout.every((l) => !l.startsWith('{')));
-			assert.deepEqual(JSON.parse(await readFile(outfile, 'utf8')).publishing_order, ['a', 'b']);
+			assert.deepEqual(JSON.parse(await readFile(outfile, 'utf8')).waves, [['a'], ['b']]);
 		} finally {
 			await rm(dir, { recursive: true, force: true });
 		}

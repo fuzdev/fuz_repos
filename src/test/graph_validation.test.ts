@@ -5,7 +5,7 @@ import { create_mock_repo } from './test_helpers.ts';
 
 describe('validate_dependency_graph', () => {
 	describe('basic functionality', () => {
-		test('builds graph and returns publishing order for simple chain', () => {
+		test('builds graph and returns the order for a simple chain', () => {
 			const repos = [
 				create_mock_repo({ name: 'lib', version: '1.0.0' }),
 				create_mock_repo({ name: 'app', version: '1.0.0', deps: { lib: '^1.0.0' } })
@@ -13,7 +13,7 @@ describe('validate_dependency_graph', () => {
 
 			const result = validate_dependency_graph(repos);
 
-			assert.deepEqual(result.publishing_order, ['lib', 'app']);
+			assert.deepEqual(result.order, ['lib', 'app']);
 			assert.deepEqual(result.production_cycles, []);
 			assert.deepEqual(result.dev_cycles, []);
 			assert.strictEqual(result.sort_error, undefined);
@@ -27,9 +27,9 @@ describe('validate_dependency_graph', () => {
 
 			const result = validate_dependency_graph(repos);
 
-			assert.strictEqual(result.publishing_order.length, 2);
-			assert.ok(result.publishing_order.includes('pkg-a'));
-			assert.ok(result.publishing_order.includes('pkg-b'));
+			assert.strictEqual(result.order.length, 2);
+			assert.ok(result.order.includes('pkg-a'));
+			assert.ok(result.order.includes('pkg-b'));
 			assert.deepEqual(result.production_cycles, []);
 			assert.deepEqual(result.dev_cycles, []);
 		});
@@ -37,7 +37,7 @@ describe('validate_dependency_graph', () => {
 		test('handles empty repos array', () => {
 			const result = validate_dependency_graph([]);
 
-			assert.deepEqual(result.publishing_order, []);
+			assert.deepEqual(result.order, []);
 			assert.deepEqual(result.production_cycles, []);
 			assert.deepEqual(result.dev_cycles, []);
 		});
@@ -57,8 +57,13 @@ describe('validate_dependency_graph', () => {
 			const result = validate_dependency_graph(repos);
 
 			// base must come first, top must come last
-			assert.strictEqual(result.publishing_order[0], 'base');
-			assert.strictEqual(result.publishing_order[3], 'top');
+			assert.strictEqual(result.order[0], 'base');
+			assert.strictEqual(result.order[3], 'top');
+			// the two mids don't depend on each other, so they share a level
+			assert.deepEqual(
+				result.levels.map((level) => [...level].sort()),
+				[['base'], ['mid-a', 'mid-b'], ['top']]
+			);
 			assert.deepEqual(result.production_cycles, []);
 		});
 	});
@@ -72,7 +77,7 @@ describe('validate_dependency_graph', () => {
 
 			const result = validate_dependency_graph(repos);
 
-			assert.deepEqual(result.publishing_order, []);
+			assert.deepEqual(result.order, []);
 			assert.strictEqual(result.production_cycles.length, 1);
 			assert.ok(result.production_cycles[0]!.includes('pkg-a'));
 			assert.ok(result.production_cycles[0]!.includes('pkg-b'));
@@ -89,7 +94,7 @@ describe('validate_dependency_graph', () => {
 
 			const result = validate_dependency_graph(repos);
 
-			assert.deepEqual(result.publishing_order, []);
+			assert.deepEqual(result.order, []);
 			assert.strictEqual(result.production_cycles.length, 1);
 			for (const name of ['pkg-a', 'pkg-b', 'pkg-c']) {
 				assert.ok(result.production_cycles[0]!.includes(name));
@@ -109,7 +114,7 @@ describe('validate_dependency_graph', () => {
 
 			const result = validate_dependency_graph(repos);
 
-			assert.deepEqual(result.publishing_order, []);
+			assert.deepEqual(result.order, []);
 			assert.strictEqual(result.production_cycles.length, 2);
 			assert.ok(result.sort_error !== undefined);
 		});
@@ -130,7 +135,7 @@ describe('validate_dependency_graph', () => {
 
 			const result = validate_dependency_graph(repos);
 
-			assert.deepEqual(result.publishing_order, []);
+			assert.deepEqual(result.order, []);
 			assert.strictEqual(result.production_cycles.length, 1);
 			assert.ok(result.sort_error !== undefined);
 		});
@@ -146,7 +151,7 @@ describe('validate_dependency_graph', () => {
 			const result = validate_dependency_graph(repos);
 
 			// Dev cycles don't block topological sort (dev deps excluded)
-			assert.strictEqual(result.publishing_order.length, 2);
+			assert.strictEqual(result.order.length, 2);
 			assert.deepEqual(result.production_cycles, []);
 			assert.strictEqual(result.dev_cycles.length, 1);
 			assert.ok(result.dev_cycles[0]!.includes('pkg-a'));
@@ -166,7 +171,7 @@ describe('validate_dependency_graph', () => {
 
 			const result = validate_dependency_graph(repos);
 
-			assert.strictEqual(result.publishing_order.length, 4);
+			assert.strictEqual(result.order.length, 4);
 			assert.deepEqual(result.production_cycles, []);
 			assert.strictEqual(result.dev_cycles.length, 2);
 		});
@@ -184,7 +189,7 @@ describe('validate_dependency_graph', () => {
 
 			const result = validate_dependency_graph(repos);
 
-			assert.deepEqual(result.publishing_order, ['lib', 'app']);
+			assert.deepEqual(result.order, ['lib', 'app']);
 			assert.deepEqual(result.dev_cycles, []);
 		});
 	});
@@ -204,7 +209,7 @@ describe('validate_dependency_graph', () => {
 
 			assert.strictEqual(result.production_cycles.length, 1);
 			assert.strictEqual(result.dev_cycles.length, 1);
-			assert.deepEqual(result.publishing_order, []); // blocked by prod cycle
+			assert.deepEqual(result.order, []); // blocked by prod cycle
 			assert.ok(result.sort_error !== undefined);
 		});
 
@@ -219,7 +224,7 @@ describe('validate_dependency_graph', () => {
 
 			// pkg-b must come first (pkg-a depends on it via prod dep)
 			// The dev dep from pkg-b to pkg-a is ignored in topological sort
-			assert.deepEqual(result.publishing_order, ['pkg-b', 'pkg-a']);
+			assert.deepEqual(result.order, ['pkg-b', 'pkg-a']);
 			assert.deepEqual(result.production_cycles, []);
 			assert.deepEqual(result.dev_cycles, []);
 		});
@@ -231,7 +236,7 @@ describe('validate_dependency_graph', () => {
 
 			const result = validate_dependency_graph(repos);
 
-			assert.deepEqual(result.publishing_order, ['solo']);
+			assert.deepEqual(result.order, ['solo']);
 			assert.deepEqual(result.production_cycles, []);
 			assert.deepEqual(result.dev_cycles, []);
 		});
@@ -247,7 +252,7 @@ describe('validate_dependency_graph', () => {
 
 			const result = validate_dependency_graph(repos);
 
-			assert.deepEqual(result.publishing_order, ['app']);
+			assert.deepEqual(result.order, ['app']);
 			assert.deepEqual(result.production_cycles, []);
 		});
 
@@ -258,7 +263,7 @@ describe('validate_dependency_graph', () => {
 
 			const result = validate_dependency_graph(repos);
 
-			assert.deepEqual(result.publishing_order, []);
+			assert.deepEqual(result.order, []);
 			assert.strictEqual(result.production_cycles.length, 1);
 			assert.ok(result.sort_error !== undefined);
 		});
@@ -272,7 +277,7 @@ describe('validate_dependency_graph', () => {
 			const result = validate_dependency_graph(repos);
 
 			// Both included in order (graph_validation doesn't filter by private)
-			assert.deepEqual(result.publishing_order, ['private', 'public']);
+			assert.deepEqual(result.order, ['private', 'public']);
 		});
 	});
 
@@ -306,6 +311,14 @@ describe('validate_dependency_graph', () => {
 });
 
 describe('analyze_repos', () => {
+	test('levels are null under a production cycle', () => {
+		const repos = [
+			create_mock_repo({ name: 'a', version: '1.0.0', deps: { b: '^1.0.0' } }),
+			create_mock_repo({ name: 'b', version: '1.0.0', deps: { a: '^1.0.0' } })
+		];
+		assert.strictEqual(analyze_repos(repos).levels, null);
+	});
+
 	test('excludes non-npm (cargo) repos from the dependency graph', () => {
 		const repos = [
 			create_mock_repo({ name: 'lib', version: '1.0.0' }),
@@ -313,12 +326,12 @@ describe('analyze_repos', () => {
 			create_mock_repo({ name: 'rust-tool', version: '0.1.0', kind: 'cargo' })
 		];
 
-		const { graph, publishing_order } = analyze_repos(repos);
+		const { graph, levels } = analyze_repos(repos);
 
-		// The cargo repo is not a graph node, so it never enters the publishing order.
+		// The cargo repo is not a graph node, so it never enters the levels.
 		assert.ok(!graph.nodes.has('rust-tool'));
 		assert.ok(graph.nodes.has('lib'));
 		assert.ok(graph.nodes.has('app'));
-		assert.deepEqual(publishing_order, ['lib', 'app']);
+		assert.deepEqual(levels, [['lib'], ['app']]);
 	});
 });

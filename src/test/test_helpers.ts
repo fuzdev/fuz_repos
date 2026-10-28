@@ -8,12 +8,10 @@ import { Logger } from '@fuzdev/fuz_util/log.ts';
 
 import type { LocalRepo } from '#lib/local_repo.ts';
 import type {
-	GitopsOperations,
+	ChangesetOperations,
 	GitOperations,
 	FsOperations,
 	NpmOperations,
-	BuildOperations,
-	ProcessOperations,
 	ReposCommandOutput,
 	ReposOperations
 } from '#lib/operations.ts';
@@ -121,21 +119,27 @@ export const create_mock_repo = (options: MockRepoOptions): LocalRepo => {
 	};
 };
 
+/** Every operations group, as the mock factories build them. */
+export interface MockGitopsOps {
+	changeset: ChangesetOperations;
+	git: GitOperations;
+	npm: NpmOperations;
+	fs: FsOperations;
+	repos: ReposOperations;
+}
+
 /**
- * Creates mock GitopsOperations with sensible defaults
+ * Creates mock operations for every group, with sensible defaults
  */
 export const create_mock_gitops_ops = (
 	overrides: Partial<{
-		changeset: Partial<GitopsOperations['changeset']>;
-		git: Partial<GitopsOperations['git']>;
-		process: Partial<GitopsOperations['process']>;
-		npm: Partial<GitopsOperations['npm']>;
-		preflight: Partial<GitopsOperations['preflight']>;
-		fs: Partial<GitopsOperations['fs']>;
-		build: Partial<GitopsOperations['build']>;
-		repos: Partial<GitopsOperations['repos']>;
+		changeset: Partial<ChangesetOperations>;
+		git: Partial<GitOperations>;
+		npm: Partial<NpmOperations>;
+		fs: Partial<FsOperations>;
+		repos: Partial<ReposOperations>;
 	}> = {}
-): GitopsOperations => ({
+): MockGitopsOps => ({
 	changeset: {
 		has_changesets: async () => ({ ok: true, value: true }),
 		read_changesets: async () => ({ ok: true, value: [] }),
@@ -147,15 +151,7 @@ export const create_mock_gitops_ops = (
 		...overrides.changeset
 	},
 	git: create_mock_git_ops(overrides.git),
-	process: {
-		run_interactive: async () => ({ ok: true }),
-		...overrides.process
-	},
 	npm: create_mock_npm_ops(overrides.npm),
-	preflight: {
-		run_preflight_checks: async () => ({ ok: true, warnings: [], errors: [] }),
-		...overrides.preflight
-	},
 	fs: {
 		readFile: async () => ({ ok: true, value: '{}' }),
 		writeFile: async () => ({ ok: true }),
@@ -163,7 +159,6 @@ export const create_mock_gitops_ops = (
 		exists: async () => false,
 		...overrides.fs
 	},
-	build: create_mock_build_ops(overrides.build),
 	repos: { ...create_ready_repos_ops(), ...overrides.repos }
 });
 
@@ -204,29 +199,18 @@ export const create_mock_package_json_files = (
  * Creates mock GitOperations for testing
  */
 export const create_mock_git_ops = (overrides: Partial<GitOperations> = {}): GitOperations => ({
-	current_commit_hash: async () => ({ ok: true, value: 'abc123' }),
 	add: async () => ({ ok: true }),
 	commit: async () => ({ ok: true }),
 	...overrides
 });
 
 /**
- * Creates mock NpmOperations for testing
+ * Creates mock NpmOperations for testing: every version is on the registry
+ * and every wait succeeds.
  */
 export const create_mock_npm_ops = (overrides: Partial<NpmOperations> = {}): NpmOperations => ({
+	view_version: async () => ({ ok: true, value: 'listed' }),
 	wait_for_package: async () => ({ ok: true }),
-	check_auth: async () => ({ ok: true, username: 'testuser' }),
-	check_registry: async () => ({ ok: true }),
-	...overrides
-});
-
-/**
- * Creates mock BuildOperations for testing
- */
-export const create_mock_build_ops = (
-	overrides: Partial<BuildOperations> = {}
-): BuildOperations => ({
-	build_package: async () => ({ ok: true }),
 	...overrides
 });
 
@@ -282,48 +266,6 @@ export const create_populated_fs_ops = (
 		fs_ops.set(path, content);
 	}
 	return fs_ops;
-};
-
-/**
- * Tracked command for process operations
- */
-export interface TrackedCommand {
-	cmd: string;
-	args: Array<string>;
-	cwd: string;
-	/** Where the command's stdout was routed, as the executor asked. */
-	stdout?: 'stdout' | 'stderr';
-}
-
-/**
- * Creates process operations that track which commands were run
- */
-export const create_tracking_process_ops = (): {
-	ops: ProcessOperations;
-	get_spawned_commands: () => Array<TrackedCommand>;
-	get_commands_by_type: (cmd_name: string) => Array<TrackedCommand>;
-	get_package_names_from_cwd: (commands: Array<TrackedCommand>) => Array<string>;
-} => {
-	const spawned_commands: Array<TrackedCommand> = [];
-
-	return {
-		ops: {
-			run_interactive: async (options) => {
-				spawned_commands.push({
-					cmd: options.cmd,
-					args: options.args,
-					cwd: options.cwd ?? '',
-					stdout: options.stdout
-				});
-				return { ok: true };
-			}
-		},
-		get_spawned_commands: () => spawned_commands,
-		get_commands_by_type: (cmd_name: string) =>
-			spawned_commands.filter((c) => c.cmd === 'gro' && c.args[0] === cmd_name),
-		get_package_names_from_cwd: (commands: Array<TrackedCommand>) =>
-			commands.map((c) => c.cwd.split('/').pop() || '')
-	};
 };
 
 /**
@@ -445,18 +387,6 @@ export const create_ready_repos_ops = (
 			return { ok: true, output: { stdout: JSON.stringify(report), stderr: '', exit_code: 0 } };
 		}
 	};
-};
-
-/**
- * Two npm repos, `b` depending on `a`, and a cargo one `c`, for the readiness
- * gate's tests; `b_entry` is `b`'s entry as the local, unfetched status read it.
- */
-export const create_gate_repos = (b_entry?: ReposEntryStatus): Array<LocalRepo> => {
-	const a = create_mock_repo({ name: 'a' });
-	const b = create_mock_repo({ name: 'b', deps: { a: '^1.0.0' } });
-	if (b_entry) b.entry = b_entry;
-	const c = create_mock_repo({ name: 'c', kind: 'cargo' });
-	return [a, b, c];
 };
 
 /**

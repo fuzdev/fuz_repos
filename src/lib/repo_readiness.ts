@@ -1,8 +1,8 @@
 /**
  * Whether each configured repo sits where the registry puts it, read from the
- * entries `repos status --json` reports: the facts `gitops_publish --wetrun`
- * gates on, the ones `gitops_sync` refuses or warns on, and the at-rest block
- * the read-only diagnostics print.
+ * entries `repos status --json` reports: the facts `gitops_release` holds a
+ * rewrite or publish on, the ones `gitops_sync` refuses or warns on, and the
+ * at-rest block the read-only diagnostics print.
  *
  * Pure — a report's facts in, problems and their messages out; no git calls.
  * The facts are decided on the Rust side (`at_rest`, `fetch_error`, a
@@ -19,7 +19,7 @@
  *   ancestor, so the plan misses nothing and the release push is still a
  *   fast-forward), and also fetched without error (so the relation is
  *   origin's current word), no other live Claude Code session in the primary
- *   checkout (the executor commits there), and nothing the entry leaves to a
+ *   checkout (the release step commits there), and nothing the entry leaves to a
  *   person (`needs_human`).
  * - **ready to generate** (`repo_readiness_for_gen`) — what `gitops_sync`
  *   needs before it writes the dashboard's site data: the primary checkout
@@ -93,13 +93,13 @@ export const repo_readiness_at_rest = (entry: ReposEntryStatus): Array<RepoReadi
 };
 
 /**
- * The ways an entry isn't ready for `gitops_publish --wetrun`: not at rest
- * (`repo_readiness_at_rest`) other than its followed branch being ahead of
- * origin, its fetch failed, another live session works in its primary
- * checkout, or it has a `needs_human` reason. Ahead is ready: origin's tip is
- * an ancestor of the branch, so the plan misses nothing and `gro publish`'s
- * push stays a fast-forward, pushing those commits with the release (see
- * `format_readiness_ahead`). A reason restating
+ * The ways an entry isn't ready for a release step to rewrite or publish it:
+ * not at rest (`repo_readiness_at_rest`) other than its followed branch being
+ * ahead of origin, its fetch failed, another live session works in its
+ * primary checkout, or it has a `needs_human` reason. Ahead is ready: origin's
+ * tip is an ancestor of the branch, so the plan misses nothing and `gro
+ * publish`'s push stays a fast-forward, pushing those commits with the
+ * release. A reason restating
  * an at-rest problem (the primary's operation or detached HEAD) is left out,
  * and a `default_branch_*` reason stands in for the followed-branch problem
  * it explains.
@@ -216,75 +216,67 @@ export const format_repo_readiness_problem = (
 	}
 };
 
+/** Why the repos a release step reads aren't ready to be rewritten or published. */
+export interface ReleaseReadiness {
+	/** Problems with the whole report, which hold every repo. */
+	global: Array<string>;
+	/** Each not-ready repo's problems, by registry key, as `what — fix` lines. */
+	by_key: Map<string, Array<string>>;
+}
+
 /**
- * Checks a `repos status --fetch --json` report on the repos a real publish
- * reads and writes: every key's entry ready (`repo_readiness_for_publish`),
- * the report fetched, and busy detection available, since a live session it
- * can't vouch for may be working in any checkout.
+ * Reads a `repos status --fetch --json` report for a release step: each key's
+ * entry ready (`repo_readiness_for_publish`), the report fetched, and busy
+ * detection available, since a live session it can't vouch for may be working
+ * in any checkout. A step commits rewrites in a dependent and names packages
+ * to publish, so a repo that isn't ready is held, and the reasons say how to
+ * fix it.
  *
  * @param options.report - the report, made with `--fetch`
- * @param options.keys - the registry keys that must be ready
- * @returns `ahead`, the ready repos whose followed branch is ahead of origin; and on failure a message naming each repo, what's wrong, and the fix, its `lines`, and every not-ready repo
+ * @param options.keys - the registry keys the step may rewrite or publish
+ * @returns the report-wide problems, and each not-ready repo's
  */
-export const check_publish_readiness = (
+export const check_release_readiness = (
 	options: {
 		report: ReposStatusReport;
 		keys: ReadonlyArray<string>;
 	} & RepoReadinessFormatOptions
-): Result<
-	{ ahead: Array<ReadinessAhead> },
-	{
-		message: string;
-		lines: Array<string>;
-		not_ready: Array<RepoReadiness>;
-		ahead: Array<ReadinessAhead>;
-	}
-> => {
+): ReleaseReadiness => {
 	const { report, keys, repos_command } = options;
 	const repos = repos_command ?? 'repos';
-	const by_key = new Map(report.entries.map((e) => [e.key, e] as const));
+	const by_entry = new Map(report.entries.map((e) => [e.key, e] as const));
 
-	const lines: Array<string> = [];
+	const global: Array<string> = [];
 	if (!report.fetched) {
-		lines.push(`the report wasn't fetched, so "in sync" is only as fresh as the last fetch`);
+		global.push(`the report wasn't fetched, so "in sync" is only as fresh as the last fetch`);
 	}
 	if (report.sessions.kind === 'unavailable') {
-		lines.push(
+		global.push(
 			`busy detection is unavailable (${format_unavailable(report.sessions.reason)}), so a live session can't be ruled out of any checkout — \`${repos} status\` says why`
 		);
 	}
 
-	const not_ready: Array<RepoReadiness> = [];
-	const ahead: Array<ReadinessAhead> = [];
+	const by_key: Map<string, Array<string>> = new Map();
 	for (const key of keys) {
-		const entry = by_key.get(key) ?? null;
+		const entry = by_entry.get(key);
 		const problems: Array<RepoReadinessProblem> = entry
 			? repo_readiness_for_publish(entry)
 			: [{ kind: 'unprobed', detail: 'not in the `repos status` report' }];
-		if (problems.length === 0) {
-			const followed = entry?.at_rest?.followed;
-			if (entry?.branch && followed?.kind === 'ahead') {
-				ahead.push({ key, branch: entry.branch, commits: followed.commits });
-			}
-			continue;
-		}
-		not_ready.push({ key, entry, problems });
-		for (const problem of problems) {
-			const { what, fix } = format_repo_readiness_problem(key, problem, options);
-			// a failed publish leaves dirt whose changesets committing or discarding would lose
-			const after_failure =
-				problem.kind === 'dirty'
-					? ' — after a failed publish, see the troubleshooting doc first'
-					: '';
-			lines.push(`${key}: ${what} — ${fix}${after_failure}`);
-		}
+		if (problems.length === 0) continue;
+		by_key.set(
+			key,
+			problems.map((problem) => {
+				const { what, fix } = format_repo_readiness_problem(key, problem, options);
+				// a failed publish leaves dirt whose changesets committing or discarding would lose
+				const after_failure =
+					problem.kind === 'dirty'
+						? ' — after a failed `gro publish`, see the troubleshooting doc first'
+						: '';
+				return `${what} — ${fix}${after_failure}`;
+			})
+		);
 	}
-
-	if (lines.length === 0) return { ok: true, ahead };
-	const message =
-		'not publishing, and nothing was changed: the plan reads every npm repo as it sits, ' +
-		`and publishing commits and pushes there, so each must be ready:\n  ${lines.join('\n  ')}`;
-	return { ok: false, message, lines, not_ready, ahead };
+	return { global, by_key };
 };
 
 /**
@@ -383,34 +375,6 @@ export const check_gen_readiness = (
 	return { ok: false, message, lines, warnings };
 };
 
-/** A ready repo whose followed branch is ahead of origin: commits a publish pushes. */
-export interface ReadinessAhead {
-	key: string;
-	branch: string;
-	commits: number;
-}
-
-/**
- * Says what happens to a ready repo's commits ahead of origin: its release
- * push carries them when it publishes, else they stay unpushed.
- *
- * @param ahead - the repo, its branch, and how many commits it's ahead
- * @param publishes - whether the plan publishes it
- * @param options - the `repos` invocation the message names
- * @returns the line to log
- */
-export const format_readiness_ahead = (
-	ahead: ReadinessAhead,
-	publishes: boolean,
-	options: RepoReadinessFormatOptions = {}
-): string => {
-	const repos = options.repos_command ?? 'repos';
-	const head = `${ahead.key}: \`${ahead.branch}\` is ${plural(ahead.commits, 'commit')} ahead of origin`;
-	return publishes
-		? `${head} — publishing pushes them with the release`
-		: `${head} — it doesn't publish, so they stay unpushed until \`${repos} sync\` or \`${repos} push\``;
-};
-
 /**
  * The repos not at rest, for the read-only diagnostics' readiness block.
  *
@@ -437,7 +401,7 @@ export const format_readiness_block = (
 ): Array<string> => {
 	if (not_ready.length === 0) return [];
 	const lines = [
-		'not at rest, so read as they sit (a real publish refuses all but a branch ahead of origin):'
+		'not at rest, so read as they sit (a release step holds all but a branch ahead of origin):'
 	];
 	for (const { key, entry, problems } of not_ready) {
 		for (const problem of problems) {

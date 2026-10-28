@@ -19,7 +19,7 @@ describe('run_gitops_analyze machine output', () => {
 		const log = create_stream_log();
 		await run_gitops_analyze(s.parse_or_throw(Args, { format: 'json' }), log, create_deps());
 		assert.strictEqual(log.stdout.length, 1);
-		assert.deepEqual(JSON.parse(log.stdout[0]!).publishing_order, ['a', 'b']);
+		assert.deepEqual(JSON.parse(log.stdout[0]!).levels, [['a'], ['b']]);
 		// the non-npm exclusion note went to stderr
 		assert.ok(log.stderr.some((l) => l.includes('excluding 1 non-npm repo(s)')));
 	});
@@ -35,6 +35,6 @@ describe('run_gitops_analyze machine output', () => {
 		const log = create_stream_log();
 		await run_gitops_analyze(s.parse_or_throw(Args, {}), log, create_deps());
 		assert.ok(log.stdout.some((l) => l.includes('excluding 1 non-npm repo(s)')));
-		assert.ok(log.stdout.some((l) => l.includes('Publishing order:')));
+		assert.ok(log.stdout.some((l) => l.includes('Dependency levels')));
 	});
 });

@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { validate_dependency_graph } from '#lib/graph_validation.ts';
 import { generate_publishing_plan } from '#lib/publishing_plan.ts';
 import { load_gitops_config } from '#lib/gitops_config.ts';
-import { publish_repos } from '#lib/multi_repo_publisher.ts';
+import { to_release_state } from '#lib/release_state.ts';
 import { create_fixture_gitops_ops } from './mock_operations.ts';
 import { fixture_to_local_repos } from './load_repo_fixtures.ts';
 import type { LocalRepo } from '#lib/local_repo.ts';
@@ -21,7 +21,7 @@ import { circular_prod_deps_error } from './repo_fixtures/circular_prod_deps_err
 import { isolated_packages } from './repo_fixtures/isolated_packages.ts';
 import { multiple_dep_types } from './repo_fixtures/multiple_dep_types.ts';
 import type { RepoFixtureSet } from './repo_fixture_types.ts';
-import { assert_publishing_order, assert_version_changes, assert_messages } from './helpers.ts';
+import { assert_order, assert_version_changes, assert_messages } from './helpers.ts';
 
 // All fixture sets
 const FIXTURES: Array<RepoFixtureSet> = [
@@ -72,20 +72,6 @@ const setup_plan_test = async (fixture: RepoFixtureSet) => {
 	return { mock_ops, local_repos, plan };
 };
 
-/**
- * Helper to set up common test data for dry run publishing tests.
- * Creates mock operations, loads repos, and runs dry run publish.
- */
-const setup_dry_run_test = async (fixture: RepoFixtureSet) => {
-	const mock_ops = create_fixture_gitops_ops(fixture);
-	const local_repos = get_fixture_repos(fixture);
-	const result = await publish_repos(local_repos, {
-		wetrun: false,
-		ops: mock_ops
-	});
-	return { mock_ops, local_repos, result };
-};
-
 // Clear cache after all tests to prevent memory leaks
 afterAll(() => {
 	fixture_repos_cache.clear();
@@ -103,16 +89,11 @@ describe('Success scenario fixtures', () => {
 	for (const fixture of SUCCESS_FIXTURES) {
 		describe(fixture.name, () => {
 			describe('analyze', () => {
-				test('produces expected publishing order', () => {
+				test('produces expected topological order', () => {
 					// No need for mock_ops in analyze - it doesn't use operations
 					const local_repos = get_fixture_repos(fixture);
-
-					// Validate dependency graph directly
-					const { publishing_order: order } = validate_dependency_graph(local_repos);
-
-					// Verify publishing order
-					assert.ok(order, 'Should have publishing_order');
-					assert_publishing_order(order, fixture.expected_outcomes.publishing_order);
+					const { order } = validate_dependency_graph(local_repos);
+					assert_order(order, fixture.expected_outcomes.order);
 				});
 			});
 
@@ -128,16 +109,14 @@ describe('Success scenario fixtures', () => {
 					}
 				});
 
-				test('reports correct publishing order', async () => {
+				test('groups the packages that publish into waves', async () => {
 					const { plan } = await setup_plan_test(fixture);
-
-					// Publishing order should match for fixtures with version changes
-					if (fixture.expected_outcomes.version_changes.length > 0) {
-						assert_publishing_order(
-							plan.publishing_order,
-							fixture.expected_outcomes.publishing_order
-						);
-					}
+					assert.deepEqual(plan.waves, fixture.expected_outcomes.waves);
+					// every version change publishes in exactly one wave
+					assert.deepEqual(
+						plan.waves.flat().sort(),
+						plan.version_changes.map((vc) => vc.package_name).sort()
+					);
 				});
 
 				// Only define if this fixture tests breaking cascades
@@ -188,55 +167,16 @@ describe('Success scenario fixtures', () => {
 				});
 			});
 
-			describe('publish dry_run', () => {
-				/*
-				 * Note: Dry runs have limitations compared to full publishing:
-				 * - Cannot auto-generate changesets (requires filesystem writes)
-				 * - Limited bump escalation (requires iteration to see new dependency versions)
-				 * - Only packages with explicit .changeset/ files can be published
-				 *
-				 * Tests validate that packages WITH explicit changesets are attempted,
-				 * but cannot fully validate auto-generated or escalated scenarios.
-				 */
-
-				test('publishes expected packages', async () => {
-					const { result } = await setup_dry_run_test(fixture);
-
-					// Dry runs can ONLY publish packages with explicit changesets
-					const packages_with_explicit_changesets =
-						fixture.expected_outcomes.version_changes.filter(
-							(vc) => vc.scenario === 'explicit_changeset' || vc.scenario === 'bump_escalation'
-						);
-
-					if (packages_with_explicit_changesets.length > 0) {
-						// Dry_run should publish packages with explicit changesets
-						assert.ok(
-							result.published.length > 0,
-							`Should publish at least some packages (expected ${packages_with_explicit_changesets.length} with explicit changesets)`
-						);
-
-						// Verify published packages are in the expected set
-						for (const published of result.published) {
-							const expected_change = fixture.expected_outcomes.version_changes.find(
-								(vc) => vc.package_name === published.name
-							);
-							assert.ok(
-								expected_change,
-								`Published package ${published.name} should be in expected changes`
-							);
-						}
-					} else {
-						// No packages with explicit changesets - dry_run should publish nothing
-						assert.equal(result.published.length, 0, 'Should not publish any packages');
-					}
-				});
-
-				test('reports success status', async () => {
-					const { result } = await setup_dry_run_test(fixture);
-
-					// Should report success for valid fixtures
-					assert.ok(result.ok, 'Should report success');
-					assert.equal(result.failed.length, 0, 'Should have no failures');
+			describe('release step', () => {
+				test('names the first wave to publish now when everything is released and ready', async () => {
+					const { plan, local_repos } = await setup_plan_test(fixture);
+					const state = to_release_state({ plan, repos: local_repos, not_ready: new Map() });
+					assert.deepEqual(state.publish_now, plan.waves[0] ?? []);
+					assert.deepEqual(state.publish_held, []);
+					assert.strictEqual(
+						state.done,
+						plan.version_changes.length === 0 && state.rewrites.length === 0
+					);
 				});
 			});
 		});
@@ -253,15 +193,10 @@ describe('Error scenario fixtures', () => {
 				test('detects circular dependencies', () => {
 					const local_repos = get_fixture_repos(fixture);
 
-					// Validate dependency graph - should detect cycles
-					const { publishing_order: order } = validate_dependency_graph(local_repos);
-
-					// For error fixtures, publishing order should be empty or contain errors
-					assert.ok(
-						order.length === 0 ||
-							order.length === fixture.expected_outcomes.publishing_order.length,
-						'Error fixtures should have empty or error publishing order'
-					);
+					// Validate dependency graph - should detect cycles, leaving no order
+					const { order, levels } = validate_dependency_graph(local_repos);
+					assert.deepEqual(order, fixture.expected_outcomes.order);
+					assert.deepEqual(levels, []);
 				});
 			});
 
@@ -312,7 +247,8 @@ describe('JSON output format tests', () => {
 		const { plan } = await setup_plan_test(fixture);
 
 		// Verify plan structure matches expected JSON format
-		assert.ok(Array.isArray(plan.publishing_order), 'Should have publishing_order array');
+		assert.ok(Array.isArray(plan.waves), 'Should have waves array');
+		assert.ok(Array.isArray(plan.awaiting_registry), 'Should have awaiting_registry array');
 		assert.ok(Array.isArray(plan.version_changes), 'Should have version_changes array');
 		assert.ok(Array.isArray(plan.dependency_updates), 'Should have dependency_updates array');
 		assert.ok(plan.breaking_cascades instanceof Map, 'Should have breaking_cascades map');
@@ -339,7 +275,8 @@ describe('JSON output format tests', () => {
 		const result = validate_dependency_graph(local_repos);
 
 		assert.ok(result.graph, 'Should have dependency graph');
-		assert.ok(Array.isArray(result.publishing_order), 'Should have publishing order');
+		assert.ok(Array.isArray(result.order), 'Should have an order');
+		assert.ok(Array.isArray(result.levels), 'Should have levels');
 		assert.ok(result.graph.nodes instanceof Map, 'Graph should have nodes map');
 
 		// Verify node structure

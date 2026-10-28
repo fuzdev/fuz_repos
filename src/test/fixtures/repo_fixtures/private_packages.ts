@@ -4,7 +4,7 @@ import type { RepoFixtureSet } from '../repo_fixture_types.ts';
  * Tests handling of private packages (private: true in package.json).
  * Private packages are excluded from version changes — they never publish, escalate, or
  * get an auto-changeset — while their dependents still publish normally. A private package
- * keeps its place in the topological order (publishing_order) but produces no version change.
+ * keeps its place in the topological order but produces no version change.
  *
  * Structure:
  * - public_lib: Public package with explicit changeset
@@ -78,8 +78,10 @@ Update to private_tool (should not publish)`
 
 	expected_outcomes: {
 		// private_tool keeps its topological slot but never publishes (no version change)
-		publishing_order: ['@test/public_lib', '@test/consumer', '@test/private_tool'],
+		order: ['@test/public_lib', '@test/consumer', '@test/private_tool'],
 
+		// each wave publishes together, after the ones before it
+		waves: [['@test/public_lib'], ['@test/consumer']],
 		version_changes: [
 			{
 				package_name: '@test/public_lib',

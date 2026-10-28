@@ -79,11 +79,13 @@ Bug fix in tool_b`
 	],
 
 	expected_outcomes: {
-		// Publishing order: tool_a and tool_b can be in either order (no prod dep cycle),
+		// Topological order: tool_a and tool_b can be in either order (no prod dep cycle),
 		// then consumer depends on both
 		// Note: Order between tool_a and tool_b is non-deterministic (both valid)
-		publishing_order: ['@test/tool_b', '@test/tool_a', '@test/consumer'],
+		order: ['@test/tool_b', '@test/tool_a', '@test/consumer'],
 
+		// each wave publishes together, after the ones before it
+		waves: [['@test/tool_a', '@test/tool_b'], ['@test/consumer']],
 		version_changes: [
 			{
 				package_name: '@test/tool_a',

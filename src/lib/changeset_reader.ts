@@ -161,8 +161,8 @@ export const determine_bump_from_changesets = (
 /**
  * Checks if a repo has any changeset files (excluding README.md).
  *
- * Used by preflight checks and publishing workflow to determine which packages
- * need to be published. Returns false if `.changeset` directory doesn't exist
+ * Used by the publishing plan to determine which packages need to be
+ * published. Returns false if `.changeset` directory doesn't exist
  * or contains only `README.md`.
  *
  * @returns true if repo has unpublished changesets

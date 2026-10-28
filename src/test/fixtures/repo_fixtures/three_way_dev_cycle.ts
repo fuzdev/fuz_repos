@@ -104,11 +104,13 @@ Bug fix in tool_z`
 	],
 
 	expected_outcomes: {
-		// Publishing order: tool_x, tool_y, tool_z can be in any order (no prod dep between them),
+		// Topological order: tool_x, tool_y, tool_z can be in any order (no prod dep between them),
 		// then app depends on all three
 		// Note: Order among the three tools is non-deterministic (all valid)
-		publishing_order: ['@test/tool_z', '@test/tool_y', '@test/tool_x', '@test/app'],
+		order: ['@test/tool_z', '@test/tool_y', '@test/tool_x', '@test/app'],
 
+		// each wave publishes together, after the ones before it
+		waves: [['@test/tool_x', '@test/tool_y', '@test/tool_z'], ['@test/app']],
 		version_changes: [
 			{
 				package_name: '@test/tool_x',

@@ -1,5 +1,5 @@
 /**
- * Auto-generation of changesets for dependency updates during publishing.
+ * Auto-generation of changesets for dependency updates during a release.
  *
  * Creates changesets when packages need to republish due to updated dependencies.
  * For parsing existing changesets, see `changeset_reader.ts`.
@@ -10,11 +10,12 @@
 import { join } from 'node:path';
 import type { Logger } from '@fuzdev/fuz_util/log.ts';
 import type { LocalRepo } from './local_repo.ts';
-import type { PublishedVersion } from './multi_repo_publisher.ts';
+import type { DependencyUpdate } from './publishing_plan.ts';
 import {
 	strip_version_prefix,
 	required_bump_for_dependency_update,
 	compare_bump_types,
+	to_range_update_bump,
 	type BumpType
 } from './version_utils.ts';
 import type { FsOperations } from './operations.ts';
@@ -37,8 +38,8 @@ export const DEPENDENCY_UPDATES_CHANGESET_FILENAME = 'dependency-updates.md';
 
 /**
  * Writes the dependent's auto-generated changeset, merging `updates` into the
- * one it already has: an earlier publish this run, or a run that stopped before
- * the dependent published, may have written it. A dependency listed in both
+ * one it already has: an earlier step of the release wrote it when another
+ * dependency was rewritten. A dependency listed in both
  * keeps its earliest `from_version` and takes the latest `to_version`; the bump
  * is recomputed over the merged list, never below the file's own.
  *
@@ -238,27 +239,31 @@ export const generate_changeset_content = (
 	return lines.join('\n');
 };
 
-export const create_dependency_updates = (
-	dependencies: Map<string, string>,
-	published_versions: Map<string, PublishedVersion>
+/**
+ * The auto-changeset lines for a dependent's prod/peer dependency updates, one
+ * per dependency: from the range's base version to the new one, with the bump
+ * and breaking flag the move amounts to. A range with no `x.y.z` base (a
+ * wildcard) counts as a patch.
+ */
+export const to_dependency_version_changes = (
+	updates: ReadonlyArray<DependencyUpdate>
 ): Array<DependencyVersionChange> => {
-	const updates: Array<DependencyVersionChange> = [];
-
-	for (const [dep_name, current_version] of dependencies) {
-		const published = published_versions.get(dep_name);
-		if (published) {
-			// Strip version prefix (^, ~, etc)
-			const clean_current = strip_version_prefix(current_version).trim();
-
-			updates.push({
-				package_name: dep_name,
-				from_version: clean_current,
-				to_version: published.new_version,
-				bump_type: published.bump_type,
-				breaking: published.breaking
-			});
-		}
+	const by_name: Map<string, DependencyVersionChange> = new Map();
+	for (const update of updates) {
+		if (update.type === 'devDependencies') continue;
+		const range_bump = to_range_update_bump(update.current_version, update.new_version);
+		const change: DependencyVersionChange = {
+			package_name: update.updated_dependency,
+			from_version: strip_version_prefix(update.current_version).trim(),
+			to_version: update.new_version,
+			bump_type: range_bump?.bump_type ?? 'patch',
+			breaking: update.breaking
+		};
+		const prior = by_name.get(change.package_name);
+		by_name.set(
+			change.package_name,
+			prior ? (merge_dependency_updates([prior], [change])[0] ?? change) : change
+		);
 	}
-
-	return updates;
+	return Array.from(by_name.values());
 };

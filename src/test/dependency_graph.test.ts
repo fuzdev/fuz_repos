@@ -1,5 +1,5 @@
 import { assert, describe, test } from 'vitest';
-import { DependencyGraph } from '#lib/dependency_graph.ts';
+import { DependencyGraph, group_into_levels, to_rank } from '#lib/dependency_graph.ts';
 import { create_mock_repo } from './test_helpers.ts';
 
 describe('DependencyGraph', () => {
@@ -416,5 +416,83 @@ describe('DependencyGraph publishing order and analysis', () => {
 			assert.strictEqual(analysis.production_cycles.length, 1);
 			assert.strictEqual(analysis.dev_cycles.length, 1);
 		});
+	});
+});
+
+describe('get_prod_peer_dependencies', () => {
+	test('names internal prod and peer dependencies, never dev or external ones', () => {
+		const graph = new DependencyGraph([
+			create_mock_repo({ name: 'core' }),
+			create_mock_repo({ name: 'peer' }),
+			create_mock_repo({ name: 'tool' }),
+			create_mock_repo({
+				name: 'app',
+				deps: { core: '^1.0.0', external: '^1.0.0' },
+				peer_deps: { peer: '>=1.0.0' },
+				dev_deps: { tool: '^1.0.0' }
+			})
+		]);
+		assert.deepEqual(graph.get_prod_peer_dependencies('app').sort(), ['core', 'peer']);
+		assert.deepEqual(graph.get_prod_peer_dependencies('missing'), []);
+	});
+});
+
+describe('group_into_levels', () => {
+	const deps: Record<string, Array<string>> = {
+		a: [],
+		b: [],
+		c: ['a'],
+		d: ['a', 'b'],
+		e: ['c', 'd']
+	};
+	const get = (name: string): Array<string> => deps[name] ?? [];
+
+	test('groups by longest dependency path, keeping the given order within a level', () => {
+		assert.deepEqual(group_into_levels(['a', 'b', 'c', 'd', 'e'], get), [
+			['a', 'b'],
+			['c', 'd'],
+			['e']
+		]);
+	});
+
+	test('independent names share one level', () => {
+		assert.deepEqual(
+			group_into_levels(['x', 'y', 'z'], () => []),
+			[['x', 'y', 'z']]
+		);
+	});
+
+	test('a dependency outside the subset does not count', () => {
+		// without `c` in the subset, `e` waits only on `d`'s level
+		assert.deepEqual(group_into_levels(['a', 'b', 'c', 'd', 'e'], get, new Set(['a', 'd', 'e'])), [
+			['a'],
+			['d'],
+			['e']
+		]);
+		// nothing it depends on publishes, so `e` is first
+		assert.deepEqual(group_into_levels(['a', 'b', 'c', 'd', 'e'], get, new Set(['e', 'b'])), [
+			['b', 'e']
+		]);
+	});
+
+	test('nothing to group is no levels', () => {
+		assert.deepEqual(group_into_levels([], get), []);
+	});
+});
+
+describe('to_rank', () => {
+	test('orders a level by rank, names it lacks last', () => {
+		const rank = to_rank(['c', 'a']);
+		assert.deepEqual(
+			[...rank],
+			[
+				['c', 0],
+				['a', 1]
+			]
+		);
+		assert.deepEqual(
+			group_into_levels(['a', 'b', 'c'], () => [], undefined, rank),
+			[['c', 'a', 'b']]
+		);
 	});
 });

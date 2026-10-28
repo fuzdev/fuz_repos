@@ -2,9 +2,9 @@
  * Dependency graph data structure and algorithms for multi-repo publishing.
  *
  * Provides the `DependencyGraph` class, built from local repos, with topological sort
- * (via `@fuzdev/fuz_util/sort.ts`), cycle detection by dependency type, and
- * wildcard-range analysis.
- * For the publishing order and the analysis workflow, see `graph_validation.ts`.
+ * (via `@fuzdev/fuz_util/sort.ts`), grouping into levels, cycle detection by
+ * dependency type, and wildcard-range analysis.
+ * For the order, the levels, and the analysis workflow, see `graph_validation.ts`.
  *
  * @module
  */
@@ -139,6 +139,20 @@ export class DependencyGraph {
 	}
 
 	/**
+	 * The names of a node's internal prod/peer dependencies — the edges that order
+	 * publishing (dev edges never do).
+	 */
+	get_prod_peer_dependencies(name: string): Array<string> {
+		const node = this.nodes.get(name);
+		if (!node) return [];
+		const deps: Array<string> = [];
+		for (const [dep_name, spec] of node.dependencies) {
+			if (spec.type !== DEPENDENCY_TYPE.DEV && this.nodes.has(dep_name)) deps.push(dep_name);
+		}
+		return deps;
+	}
+
+	/**
 	 * Detects circular dependencies, categorized by severity.
 	 *
 	 * Production/peer cycles prevent publishing (impossible to order packages).
@@ -240,3 +254,49 @@ export class DependencyGraph {
 		return { nodes, edges };
 	}
 }
+
+/**
+ * Groups names into levels by their longest dependency path: a name's level is one
+ * past the deepest of its dependencies in `names`, and dependencies outside
+ * `names` don't count. So a level's names never depend on each other, and each
+ * depends only on names in earlier levels — work within a level can run in
+ * parallel. Within a level, names follow `rank` when given (config order, say),
+ * else `order`.
+ *
+ * @param order - every name to group, dependencies before dependents (a topological order)
+ * @param get_dependencies - the names one name depends on
+ * @param names - the names to group, a subset of `order`; defaults to all of it
+ * @param rank - each name's position within its level; names it lacks go last
+ * @returns the levels, shallowest first, with no empty level
+ */
+export const group_into_levels = (
+	order: ReadonlyArray<string>,
+	get_dependencies: (name: string) => Iterable<string>,
+	names?: ReadonlySet<string>,
+	rank?: ReadonlyMap<string, number>
+): Array<Array<string>> => {
+	const level_by_name: Map<string, number> = new Map();
+	const levels: Array<Array<string>> = [];
+	for (const name of order) {
+		if (names && !names.has(name)) continue;
+		let level = 0;
+		for (const dep of get_dependencies(name)) {
+			const dep_level = level_by_name.get(dep);
+			if (dep_level !== undefined && dep_level >= level) level = dep_level + 1;
+		}
+		level_by_name.set(name, level);
+		(levels[level] ??= []).push(name);
+	}
+	if (rank) {
+		const position = (name: string): number => rank.get(name) ?? Number.MAX_SAFE_INTEGER;
+		for (const level of levels) level.sort((a, b) => position(a) - position(b));
+	}
+	return levels;
+};
+
+/** Each name's position in `names`, for `group_into_levels`'s `rank`. */
+export const to_rank = (names: Iterable<string>): Map<string, number> => {
+	const rank: Map<string, number> = new Map();
+	for (const name of names) if (!rank.has(name)) rank.set(name, rank.size);
+	return rank;
+};

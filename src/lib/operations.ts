@@ -2,8 +2,8 @@
  * Operations interfaces for dependency injection.
  *
  * This is the core pattern enabling testability without mocks.
- * All side effects (git, npm, fs, process, build, and the `repos` binary) are
- * abstracted into interfaces.
+ * All side effects (git, npm, fs, and the `repos` binary) are abstracted into
+ * interfaces.
  *
  * **Design principles:**
  * - All operations accept a single `options` object parameter
@@ -14,13 +14,12 @@
  *
  * **Production usage:**
  * ```typescript
- * import {default_gitops_operations} from './operations_defaults.ts';
- * const ops = default_gitops_operations;
- * const result = await ops.git.current_commit_hash({cwd: '/path'});
+ * import {default_npm_operations} from './operations_defaults.ts';
+ * const result = await default_npm_operations.view_version({pkg: '@fuzdev/fuz_util', version: '0.1.0'});
  * if (!result.ok) {
  *   throw new TaskError(result.message);
  * }
- * const commit = result.value;
+ * const published = result.value;
  * ```
  *
  * **Test usage:**
@@ -29,8 +28,8 @@
  * const ops = create_mock_gitops_ops({
  *   changeset: {has_changesets: async () => ({ok: true, value: false})}
  * });
- * const result = await publish_repos(repos, {...options, ops});
- * // Assert on result without any real git/npm calls
+ * const plan = await generate_publishing_plan(repos, {ops: ops.changeset});
+ * // Assert on the plan without any real git/npm calls
  * ```
  *
  * See `operations_defaults.ts` for real implementations, and the test-side mock
@@ -48,8 +47,7 @@ import type { Logger } from '@fuzdev/fuz_util/log.ts';
 import type { LocalRepo } from './local_repo.ts';
 import type { ChangesetInfo } from './changeset_reader.ts';
 import type { BumpType } from './version_utils.ts';
-import type { PreflightResult, RunPreflightChecksOptions } from './preflight_checks.ts';
-import type { WaitOptions } from './npm_registry.ts';
+import type { RegistryVersion, WaitOptions } from './npm_registry.ts';
 
 /**
  * Changeset operations for reading and predicting versions from `.changeset/*.md` files.
@@ -84,19 +82,12 @@ export interface ChangesetOperations {
 }
 
 /**
- * Git operations the publishing executor authors with: staging and committing
- * dependency updates and auto-changesets, and reading the commit it published.
- * All operations return `Result` instead of throwing errors. Where each repo
- * sits (branch, dirt, relation to origin) is `ReposOperations`'s to report.
+ * Git operations the release step authors with: staging and committing
+ * dependency rewrites and auto-changesets. All operations return `Result`
+ * instead of throwing errors. Where each repo sits (branch, dirt, relation to
+ * origin) is `ReposOperations`'s to report.
  */
 export interface GitOperations {
-	/**
-	 * Gets the current commit hash.
-	 */
-	current_commit_hash: (options?: {
-		cwd?: string;
-	}) => Promise<Result<{ value: string }, { message: string }>>;
-
 	/**
 	 * Stages files for commit.
 	 */
@@ -114,33 +105,6 @@ export interface GitOperations {
 		files: Array<string>;
 		cwd?: string;
 	}) => Promise<Result<object, { message: string }>>;
-}
-
-/**
- * Process operations for the commands the publishing executor runs in a repo
- * (`gro publish`, `gro deploy`).
- */
-export interface ProcessOperations {
-	/**
-	 * Runs a command in the foreground and waits for it to exit: stdin is the
-	 * terminal's, so a prompt (npm's 2FA one-time password) can be answered, and
-	 * the child's output shows live — its stdout on ours, or on our stderr when
-	 * `stdout` says so, and its stderr on ours. A failure carries the end of
-	 * what the child wrote to stderr, bounded in lines and characters.
-	 */
-	run_interactive: (options: {
-		cmd: string;
-		args: Array<string>;
-		cwd?: string;
-		/**
-		 * Where the child's stdout goes: our stdout, or our stderr when our stdout
-		 * carries a machine-readable stream (JSON-lines events, a JSON or markdown
-		 * report) the child's output would corrupt.
-		 *
-		 * @default 'stdout'
-		 */
-		stdout?: 'stdout' | 'stderr';
-	}) => Promise<Result<object, { message: string; stderr_tail?: string }>>;
 }
 
 /**
@@ -175,22 +139,21 @@ export interface ReposOperations {
 }
 
 /**
- * Build operations for validating packages compile before publishing.
- */
-export interface BuildOperations {
-	/**
-	 * Builds a package using `gro build`.
-	 */
-	build_package: (options: {
-		repo: LocalRepo;
-	}) => Promise<Result<object, { message: string; output?: string }>>;
-}
-
-/**
- * NPM registry operations for package availability checks and authentication.
- * Includes exponential backoff for waiting on package propagation.
+ * Registry operations: whether a version is out, and waiting for one to
+ * propagate. npm's own config picks the registry, so a scope pointed elsewhere
+ * is read there.
  */
 export interface NpmOperations {
+	/**
+	 * What the registry shows for `pkg@version` (`RegistryVersion`). Fails when
+	 * npm can't answer (offline, auth, a crash), so an outage never reads as
+	 * unpublished.
+	 */
+	view_version: (options: {
+		pkg: string;
+		version: string;
+	}) => Promise<Result<{ value: RegistryVersion }, { message: string }>>;
+
 	/**
 	 * Waits for a package version to be available on NPM.
 	 * Uses exponential backoff with configurable timeout.
@@ -201,28 +164,6 @@ export interface NpmOperations {
 		wait_options?: WaitOptions;
 		log?: Logger;
 	}) => Promise<Result<object, { message: string }>>;
-
-	/**
-	 * Checks npm authentication status.
-	 */
-	check_auth: () => Promise<Result<{ username: string }, { message: string }>>;
-
-	/**
-	 * Checks if npm registry is reachable.
-	 */
-	check_registry: () => Promise<Result<object, { message: string }>>;
-}
-
-/**
- * Preflight validation operations run before publishing: building every
- * package the plan publishes, and npm authentication. Repo git state is the
- * readiness gate's, before preflight (see `repo_readiness.ts`).
- */
-export interface PreflightOperations {
-	/**
-	 * Runs preflight validation checks before publishing.
-	 */
-	run_preflight_checks: (options: RunPreflightChecksOptions) => Promise<PreflightResult>;
 }
 
 /**
@@ -255,20 +196,4 @@ export interface FsOperations {
 	 * Checks if a path exists on the file system.
 	 */
 	exists: (options: { path: string }) => Promise<boolean>;
-}
-
-/**
- * Combined operations interface grouping all gitops functionality.
- * This is the main interface injected into publishing and validation workflows.
- */
-export interface GitopsOperations {
-	changeset: ChangesetOperations;
-	git: GitOperations;
-	process: ProcessOperations;
-	npm: NpmOperations;
-	preflight: PreflightOperations;
-	fs: FsOperations;
-	build: BuildOperations;
-	/** `repos status`, for the executor's re-check of each repo right before its publish. */
-	repos: ReposOperations;
 }

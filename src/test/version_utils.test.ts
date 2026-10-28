@@ -6,6 +6,8 @@ import {
 	get_version_prefix,
 	normalize_version_for_comparison,
 	needs_update,
+	compare_versions,
+	to_range_update_bump,
 	get_update_prefix,
 	is_breaking_change,
 	detect_bump_type,
@@ -111,6 +113,18 @@ describe('version_utils', () => {
 	});
 
 	describe('needs_update', () => {
+		test('only moves a range forward', () => {
+			assert.strictEqual(needs_update('^0.54.0', '0.55.0'), true);
+			assert.strictEqual(needs_update('>=0.56.0', '0.55.0'), false);
+			assert.strictEqual(needs_update('^1.10.0', '1.9.0'), false);
+		});
+
+		test('never moves a protocol range', () => {
+			assert.strictEqual(needs_update('file:../lib', '1.0.0'), false);
+			assert.strictEqual(needs_update('workspace:*', '1.0.0'), false);
+			assert.strictEqual(needs_update('npm:other@^1.0.0', '2.0.0'), false);
+		});
+
 		test('always updates wildcards', () => {
 			assert.strictEqual(needs_update('*', '1.0.0'), true);
 			assert.strictEqual(needs_update('*', '2.0.0'), true);
@@ -244,5 +258,40 @@ describe('version_utils', () => {
 			assert.strictEqual(required_bump_for_dependency_update('1.0.0', false), 'patch');
 			assert.strictEqual(required_bump_for_dependency_update('2.5.10', false), 'patch');
 		});
+	});
+});
+
+describe('compare_versions', () => {
+	test('orders x.y.z numerically, null otherwise', () => {
+		assert.ok(compare_versions('0.9.0', '0.10.0')! < 0);
+		assert.ok(compare_versions('1.0.0', '0.99.99')! > 0);
+		assert.strictEqual(compare_versions('1.2.3', '1.2.3'), 0);
+		assert.strictEqual(compare_versions('1.0.0-next.1', '1.0.0'), null);
+	});
+});
+
+describe('to_range_update_bump', () => {
+	test('measures from the range base, prefix stripped', () => {
+		assert.deepEqual(to_range_update_bump('^0.54.0', '0.55.1'), {
+			bump_type: 'minor',
+			breaking: true
+		});
+		assert.deepEqual(to_range_update_bump('>=0.55.0', '0.55.1'), {
+			bump_type: 'patch',
+			breaking: false
+		});
+		assert.deepEqual(to_range_update_bump('^1.2.0', '1.3.0'), {
+			bump_type: 'minor',
+			breaking: false
+		});
+		assert.deepEqual(to_range_update_bump('^1.2.0', '2.0.0'), {
+			bump_type: 'major',
+			breaking: true
+		});
+	});
+
+	test('null without an x.y.z base', () => {
+		assert.strictEqual(to_range_update_bump('*', '1.0.0'), null);
+		assert.strictEqual(to_range_update_bump('^1.0.0 || ^2.0.0', '2.1.0'), null);
 	});
 });

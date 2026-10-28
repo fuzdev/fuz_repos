@@ -42,18 +42,22 @@ Each problem names a key in `gitops.config.ts`:
 When no `repos.toml` is found walking up from the cwd, pass
 `--registry <path>`.
 
-### "not publishing, and nothing was changed: … each must be ready"
+### "held rewrite of …'s ranges" or "held publish of …"
 
-`gro gitops_publish --wetrun` fetches every npm repo in the config and refuses
-unless each is ready. It moves nothing to get there, so the refusal changes
-nothing; each line names a repo, what's wrong, and the fix:
+`gro gitops_release` fetches every npm repo in the config and holds a rewrite
+or a publish in one that isn't ready, carrying on with the others. It moves no
+repo to get there; each line names what's wrong and the fix:
+
+- **…'s repo isn't ready, so whether it has more to publish can't be read** —
+  a dependency's repo is held (its own lines say why), and it may hide a
+  changeset, so this dependent waits with it: fix that repo and step again
 
 - **on `feature`, not `main`** (or **detached at …**) — the primary checkout
   isn't on the branch the registry entry follows: switch back once the work
   there is committed or stashed
 - **uncommitted changes (… staged, … unstaged, … untracked, … conflicted)** —
   commit, stash, or discard them; untracked files count. After a failed
-  publish, see [Uncommitted changes after a failed `changeset publish`](#uncommitted-changes-after-a-failed-changeset-publish)
+  `gro publish`, see [Uncommitted changes after a failed `changeset publish`](#uncommitted-changes-after-a-failed-changeset-publish)
   before committing
 - **a rebase is in progress** (or merge, cherry-pick, …) — finish or abort it
 - **`main` is N commits behind origin** — `repos sync <key>` fast-forwards it
@@ -68,20 +72,17 @@ nothing; each line names a repo, what's wrong, and the fix:
 - **fetching origin failed (…)** — fix the remote (network, auth, a gone ref)
   and rerun; `repos status --fetch <key>` retries the fetch
 - **another live Claude Code session works in its checkout (pid …)** — the
-  publish commits there, so wait for that session to finish
+  step commits there, so wait for that session to finish
 - **busy detection is unavailable (…)** — a session file couldn't be read or
-  vouched for, so no checkout can be ruled out; `repos status` says why
+  vouched for, so no checkout can be ruled out, and every repo is held;
+  `repos status` says why
 - **origin isn't the registry's repo**, or another `needs_human` reason —
   `repos status <key>` names the fix
 
-A branch ahead of origin isn't refused (see
-[Readiness](publishing.md#readiness)).
-
-It gates every npm repo, not just the ones being published: the plan reads
-each one's changesets and versions, so a repo off its branch or behind origin
-could make it wrong. The diagnostics (`gitops_plan`, `gitops_analyze`,
-`gitops_validate`, the dry run) print the same problems as warnings, from
-local refs, before you try.
+A branch ahead of origin isn't held (see
+[Readiness](publishing.md#readiness)). The diagnostics (`gitops_plan`,
+`gitops_analyze`, `gitops_validate`) print the same problems as warnings, from
+local refs, before you step.
 
 ### "not generating the site data: … on its registry branch, clean, and idle"
 
@@ -89,7 +90,7 @@ local refs, before you try.
 tree beside origin's CI, so it refuses a repo that would show something else:
 off the branch its registry entry follows, dirty (untracked files count), or
 mid-operation — each line names the repo, what's wrong, and the fix, as the
-publish refusal above does. It refuses before any fetch and changes nothing.
+release step's holds above do. It refuses before any fetch and changes nothing.
 Move the repo back, or pass `--allow_dirty` to generate from the repos as they
 sit, with each problem logged as a warning. `gro gitops_sync --check` prints
 the same report from local refs, without a token, and exits non-zero when a
@@ -111,91 +112,99 @@ Each line names the repo, what it lacks, and the fix — `npm install`,
 installs nothing, and `--allow_dirty` doesn't reach this refusal.
 `gro gitops_sync --check` reports it too.
 
-The other tasks (`gitops_analyze`, `gitops_plan`, `gitops_publish`,
+The other tasks (`gitops_analyze`, `gitops_plan`, `gitops_release`,
 `gitops_validate`) load each repo from its `package.json` alone — no module
 analysis and no `.gro/library.json` — so loading needs no installed
-dependencies (a `gitops_publish --wetrun` still builds and publishes each
-repo, which does). A `.gro/library.json` cached by an analysis without the
+dependencies (the `gro publish` you run in each repo does). A `.gro/library.json` cached by an analysis without the
 dependencies (another `library_load_from_repo` caller, or an older
 fuz_repos) stays at its commit: if the dashboard shows `any` for a repo whose
 dependencies are installed, delete it and run `gro gitops_sync` again.
 
-### "npm authentication failed"
+### "couldn't read the registry, so nothing was changed"
 
-Log in to npm:
+The step asks npm (`npm view <pkg>@<version>`) whether each publishable
+package's current version is out, and stops before writing anything when npm
+can't answer for one — offline, an auth or registry error, npm missing — so an
+outage never reads as unpublished. Each line names the package and npm's
+error. npm's own config (`.npmrc`, `npm_config_registry`) picks the registry.
+
+### "Awaiting the registry"
+
+A package the registry knows whose current version it doesn't show, with no
+changesets left: either `gro publish` put it out moments ago and it's still
+propagating (npm's CDN can take minutes), or the publish never finished. The
+step holds its dependents — their ranges and publishes — until it shows.
+Rerun later, or pass `--wait` to poll for it (`--max_wait`, in ms, 10 minutes
+by default).
+
+If it never shows, the version wasn't published: `gro publish` bumped it but
+failed before or during `changeset publish`. Check that repo's `git status`
+(see [below](#uncommitted-changes-after-a-failed-changeset-publish)) and run
+`gro publish` there again.
+
+### "never published, with nothing to publish"
+
+The registry has never seen the package, it has no changesets, and no
+configured package depends on it for prod or peer — an app or site that never
+publishes, most likely. It's an update-only leaf, like a private package: its
+own ranges move without an auto-bump, no range moves for it, and it doesn't
+hold the release. Mark it `"private": true` if it never will publish; add a
+changeset to publish it for the first time.
+
+A package the registry has never seen that something depends on for prod or
+peer is listed as awaiting the registry instead: npm answers a first publish
+with E404 until it propagates, so step again in a few minutes or pass
+`--wait`. If it never shows, it was never published — publish it, or drop
+the dependency on it.
+
+### "the plan has errors, so nothing was changed"
+
+The plan couldn't be fully computed — a production dependency cycle, a
+changeset that couldn't be read or predicted — so the step writes nothing.
+Each error is listed; fix them and step again.
+
+### "… rewrite(s) failed, the rest were committed"
+
+A dependent's `package.json` rewrite failed (each line names it); the others
+committed, and the failed one isn't named to publish. It may hold a written
+`package.json` and a staged changeset — check its `git status` and commit or
+restore them, then step again: the step reads the state afresh and redoes any
+rewrite still due.
+
+A republishing dependent whose `package.json` already names the new version
+fails here too: it changed after the step read it, and skipping its rewrite
+would drop its auto-changeset.
+
+### "npm authentication failed" or `E401`/`ENEEDAUTH`/`EOTP` from `gro publish`
+
+Log in to npm, and have the one-time password ready: npm asks for it per
+publish unless its 2FA window is still open, which is why a wave is best
+published in one go.
 
 ```bash
 npm login
 npm whoami  # verify login
 ```
 
-### "Preflight checks failed: [package] failed to build"
-
-Fix the build errors before publishing:
-
-```bash
-cd path/to/package
-gro build  # See the full build error
-# Fix the errors
-gro build  # Verify it works
-```
-
-Build validation runs during preflight checks to prevent broken state. Every
-package the plan publishes — explicit changesets and auto-generated alike —
-must build before any publishing begins.
-
-### "Plan differs from actual publish"
-
-The dry run (`gro gitops_publish`) reports the same cascade as `gro gitops_plan`
-— including bump escalations and auto-generated changesets — so the preview and
-the plan always agree. If they ever disagree, regenerate both and compare.
-
-A real publish (`--wetrun`) executes that plan and **fails loud** if a published
-version diverges from the plan's prediction — it aborts with a `drift` failure
-rather than silently continuing. The executor reads the version back from the
-repo's `package.json` after `gro publish`, so npm propagation can't cause drift.
-Drift means the version `changeset version` wrote isn't the plan's prediction:
-
-- The changesets changed after the plan was generated (a commit that added or
-  edited one leaves the branch ahead, which the re-check passes)
-- The plan's version prediction disagrees with `changeset version` — a bug
-  worth reporting
-
-Solution: re-run `gro gitops_publish --wetrun`. It re-plans from the current
-working tree (already-published packages drop out) and continues. The drifted
-package is already on npm, but its dependents weren't rewritten, and the re-run
-won't do it: update their ranges by hand, or add a changeset to them.
-
-### "… isn't ready to publish, re-checked right before `gro publish`"
-
-Right before each `gro publish`, the executor re-checks that repo as the gate
-did (a fresh `repos status --fetch`) and aborts before touching npm unless it's
-still ready. Something changed after the gate — another session pushed to
-origin, a tracked file was edited, a session started working there. The
-failure's code is `not_ready`; packages published before it stay published.
-Fix what it names, then re-run `gro gitops_publish --wetrun` to resume.
-
 ### A release commit and tag left local (the push was rejected)
 
-`gro publish` doesn't check its own `git push`. If origin moved in the seconds
-between the executor's re-check and that push, git rejects it, but `gro
-publish` still succeeds: the version is on npm and the cascade carries on.
-Git's rejection in the output is the only sign. The release commit and its
-`vX.Y.Z` tag stay local, on a branch now diverged from origin, and the next
-publish's gate refuses it. Merge origin's branch in (a rebase would leave the
+`gro publish` doesn't check its own `git push`. If origin moved after it
+pulled, git rejects the push, but `gro publish` still succeeds: the version is
+on npm. Git's rejection in the output is the only sign. The release commit and
+its `vX.Y.Z` tag stay local, on a branch now diverged from origin, and the
+next step holds the repo. Merge origin's branch in (a rebase would leave the
 tag on a commit the branch no longer holds — which is why `repos sync` and
 `repos push` leave a diverged branch with a tag on its local commits to a
-person), push the
-branch with `repos push`, and push the tag by hand, since `repos` never pushes
-tags.
+person), push the branch with `repos push`, and push the tag by hand, since
+`repos` never pushes tags.
 
 ### Uncommitted changes after a failed `changeset publish`
 
 A `gro publish` that fails partway through `changeset version` or `changeset
 publish` can leave the tree dirty with the consumed changesets deleted. gro's
 own advice there is `git reset --hard`: committing would drop the changesets,
-so the retry would have nothing to publish. The readiness gate reports the dirt
-without knowing which case it is — check `git status` before choosing.
+so the retry would have nothing to publish. The step reports the dirt without
+knowing which case it is — check `git status` before choosing.
 
 ### "Production dependency cycle: a → b"
 
@@ -208,92 +217,29 @@ You must:
 
 Note: Dev dependency cycles are normal and allowed, reported as info.
 
-### "Failed to publish pkg: `gro publish …` failed (code 1)"
-
-`gro publish` ran and exited non-zero. Its output streamed live above the
-failure, and the failure in the result, the `--emit_json` events, and the JSON
-or markdown report repeats the end of its stderr — npm's `E401`/`ENEEDAUTH`
-(log in with `npm login`), `EOTP` (the one-time password was missing or
-expired), a failing `gro check`, and so on. Known secret shapes, like npm
-tokens, are redacted from the message. The failure's code is `publish`;
-packages published before it stay published. Fix it, then re-run `gro
-gitops_publish --wetrun` to resume.
-
-npm prompts for a 2FA one-time password on the terminal: the executor gives
-`gro publish` the terminal's stdin, so answer the prompt when it appears.
-Declining the prompt (Ctrl-C) fails that package like any publish error;
-packages already published still get their dev-dependency commits and, under
-`--deploy`, their deploys. npm prompts only when both stdin and the child's
-stdout are a terminal; piping `gro gitops_publish`'s stdout without
-`--emit_json` or a report format disables the prompt.
-
-### "Failed to wait for package: Error: Timeout waiting for pkg@1.2.3 after 600000ms"
-
-After each publish the executor waits for the new version to be visible on npm
-before rewriting its dependents; this failure aborts the run. NPM propagation
-can be slow. Either:
-
-- Increase timeout with `--max_wait` (in ms; default is 10 minutes / 600000ms);
-  past about 20 minutes the 30-attempt cap ends the wait first
-- Check NPM registry status
-- Verify package was actually published
-- If verified published, re-run `gro gitops_publish --wetrun` to continue
-  (already-published packages will be skipped). Its dependents weren't
-  rewritten, and the re-run won't do it: update their ranges by hand, or add a
-  changeset to them
-
-### "Failed to update …'s dependencies: …"
-
-After a package publishes, the executor rewrites each dependent's
-`package.json` and commits it, with an auto-changeset when the dependent
-republishes. This failure (code `dependency_update`) names the dependent whose
-rewrite failed; the package that just published stays published. A prod/peer rewrite
-failing stops the run; a dev-dependency one, after every publish, is reported
-and the other repos' dev bumps go on.
-
-The failed dependent may hold a written `package.json` and a staged
-changeset — check its `git status` and commit or restore them. Then update
-the remaining ranges by hand, or add a changeset to it, before re-running
-`gro gitops_publish --wetrun`: the published package has no changesets left,
-so the re-plan won't rewrite its dependents. Dependents rewritten before the
-failure are committed and resume on their own.
-
-A republishing dependent whose `package.json` already names the new version
-fails here too: it changed after the plan read it, and skipping its rewrite
-would drop its auto-changeset.
-
 ## Unexpected Behavior
 
 ### "Auto-changeset generated when I didn't expect it"
 
 This happens when:
 
-- A dependency was published with a new version
-- Your package has that dependency in dependencies or peerDependencies
+- A dependency was released with a new version
+- Your package names that dependency in dependencies or peerDependencies, in
+  a range whose base version is older
 
 This is correct behavior - packages must republish when their dependencies
-change.
-
-### "Why was my package deployed when it didn't publish?"
-
-Deployment occurs for packages with ANY changes (not just published packages):
-
-- Published in this run
-- Production/peer dependencies updated
-- Dev dependencies updated (requires rebuild/deploy)
-
-This is correct behavior - dev dep changes require redeployment even without
-version bumps.
+change. A range that lagged behind before the release counts too: the step
+rewrites it, and its move is measured from the range's base (see
+[Dependency Update Behavior](publishing.md#dependency-update-behavior)).
 
 ### "analyze/plan show stale data or the wrong branch"
 
-The diagnostics (`gitops_analyze`, `gitops_plan`, `gitops_validate`,
-`gitops_publish` dry run) read each repo's working tree **as-is** — whatever
-branch is checked out, including uncommitted changes. They move no ref: no
-branch switch, no pull. Each prints a "not at rest" block naming the repos
-off their registry branch, dirty, mid-operation, or out of sync with origin as
-of the last fetch. To run against each repo's registry branch with the latest
-changes:
+The diagnostics (`gitops_analyze`, `gitops_plan`, `gitops_validate`) read each
+repo's working tree **as-is** — whatever branch is checked out, including
+uncommitted changes. They move no ref: no branch switch, no pull. Each prints
+a "not at rest" block naming the repos off their registry branch, dirty,
+mid-operation, or out of sync with origin as of the last fetch. To run against
+each repo's registry branch with the latest changes:
 
 ```bash
 repos sync       # fetch, fast-forward what's behind, push what's ahead
@@ -308,39 +254,28 @@ its branch or dirty stays as it is until you move it.
 When the repo has changeset files but none yields a bump for its package, the
 plan takes no bump from those files (it publishes only if a dependency update
 gives it an auto-changeset) and warns, naming the repo and why — none of the
-files parses, or none that parses names the package. Preflight builds only
-what the plan publishes, so it builds the repo only when it publishes that way.
-Check:
+files parses, or none that parses names the package. Check:
 
 1. Changeset file is in `.changeset/` directory
 2. Changeset file is not `README.md`
 3. Changeset references the correct package name
 4. Changeset has valid frontmatter format
 
-### "How does resumption work after failures?"
+### "How does picking up a release work?"
 
-Resumption is **automatic** and **natural**:
+Each step derives the release from what it observes — changesets, each
+`package.json`, and what the registry shows — so there's nothing to resume
+and no state to go stale:
 
-1. When `gro publish` succeeds, it consumes changesets
-2. A single `gro gitops_publish --wetrun` run handles the full dependency cascade:
-   the plan resolves it up front and the publish executes it in one pass
-3. If publishing fails mid-way, re-run `gro gitops_publish --wetrun`:
-   - It re-plans from the current working tree
-   - Already-published packages have no changesets → drop out of the new plan
-   - Failed packages still have changesets → retried automatically
-   - A published package's dependents left unrewritten (a `drift`, `network`,
-     or `dependency_update` failure) aren't rewritten by the re-run: update
-     them first, as each of those sections says
-   - Repos left ahead of origin by the run's own commits pass the gate (see
-     [Readiness](publishing.md#readiness))
-4. No state files needed, just re-run the same command!
-
-This is safer than explicit state tracking because:
-
-- No stale state files to confuse users
-- No need to remember `--resume` flag
-- The readiness gate catches incomplete operations
-- Changeset consumption provides natural, foolproof resumption
+1. `gro publish` consumes a package's changesets and puts its new version out
+2. The next step sees that version on the registry, so the package is
+   released: it rewrites the dependents still trailing it (with their
+   auto-changesets) and names the next wave
+3. A step that ran early, a release made by hand, or a wave whose step never
+   ran all come out the same: the dependents' ranges still trail the released
+   version, so the step rewrites them
+4. A failed `gro publish` leaves its changesets (or a dirty tree, above); fix
+   it and publish that package again
 
 ## Debugging Tips
 
@@ -350,43 +285,21 @@ This is safer than explicit state tracking because:
 gro gitops_analyze --format markdown --outfile deps.md
 ```
 
-### Preview a publish's side effects
+### Preview a step
 
 ```bash
-gro gitops_publish --preview  # the ordered publishes, npm waits, dependency rewrites, dev-dep updates, and (with --deploy) deploys a --wetrun would perform
+gro gitops_release  # the rewrites it would commit and the wave it would name; writes nothing
 ```
-
-### Find what stopped a real publish
-
-```bash
-gro gitops_publish --wetrun --format json --outfile result.json
-```
-
-`result.json`'s `events` list each package's outcome in order. A failure is a
-`package_failed` event whose `code` says why — one of `drift` (the version
-`changeset version` wrote isn't the plan's; its `error` names both),
-`not_ready`, `network` (the npm wait), `publish` (its `error` ends with the
-end of `gro publish`'s stderr), or `dependency_update` (a dependent's
-`package.json` rewrite; the event names the dependent — see
-["Failed to update …'s dependencies"](#failed-to-update-s-dependencies-)).
-`failed[]` names each failed package with its
-`error` message as a string; when the executor itself threw (a plan with
-errors, a failed preflight) it holds one entry named `FATAL_ERROR` carrying
-the thrown message. A readiness refusal or a blocked plan throws before any
-report is written. The report's events and failures and `--emit_json`'s live
-stream mask secrets. Under `--emit_json`, or a report written to stdout rather
-than `--outfile`, the task's log, the confirmation
-prompt, and the stdout of `gro publish` and `gro deploy` go to stderr, out of
-the JSON's way.
 
 ### Extra lines before the JSON on stdout
 
 Gro prints `[<task>] invoking <task>` and `[<task>] → <task> …` before running
-a task, out of the task's reach, so they lead stdout even under `--format json`
-or `--emit_json`. Everything after is the document or the events (the log goes
-to stderr). Write the report with `--outfile`, or skip the two lines
-(`tail -n +3` at the default log level). If `.svelte-kit` or SvelteKit's generated `node_modules/$app/tsconfig.json` is missing, gro runs `svelte-kit sync` first, and
-its output can land there too.
+a task, out of the task's reach, so they lead stdout even under `--format
+json`. Everything after is the document (the log goes to stderr). Write the
+report with `--outfile`, or skip the two lines (`tail -n +3` at the default
+log level). If `.svelte-kit` or SvelteKit's generated
+`node_modules/$app/tsconfig.json` is missing, gro runs `svelte-kit sync`
+first, and its output can land there too.
 
 ### Check what changed since last publish
 

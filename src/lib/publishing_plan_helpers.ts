@@ -1,138 +1,101 @@
 /**
- * Helper functions for publishing plan calculations.
- *
- * Extracted from `publishing_plan.ts` to reduce file size.
+ * Helper functions for publishing plan calculations: the dependency updates a
+ * release implies and the bump they require.
  *
  * @module
  */
 
 import type { LocalRepo } from './local_repo.ts';
-import {
-	needs_update,
-	required_bump_for_dependency_update,
-	type BumpType
-} from './version_utils.ts';
-import type { DependencyUpdate } from './publishing_plan.ts';
+import { needs_update, to_range_update_bump } from './version_utils.ts';
+import type { DependencyUpdate, VersionChange } from './publishing_plan.ts';
+
+/** A `package.json` dependency section. */
+export type DependencySection = DependencyUpdate['type'];
+
+/** Every dependency section, in the order updates are listed. */
+export const DEPENDENCY_SECTIONS: ReadonlyArray<DependencySection> = [
+	'dependencies',
+	'peerDependencies',
+	'devDependencies'
+];
+
+const to_section_dependencies = (
+	repo: LocalRepo,
+	section: DependencySection
+): Map<string, string> | undefined =>
+	section === 'dependencies'
+		? repo.dependencies
+		: section === 'peerDependencies'
+			? repo.peer_dependencies
+			: repo.dev_dependencies;
 
 /**
- * Calculates all dependency updates between packages based on predicted versions.
+ * The updates one package's dependency ranges need so each names its
+ * dependency's version after the release: `targets` maps every package to
+ * that version, its predicted one when it publishes and its current one
+ * otherwise. A range already naming it, or staged ahead of it, needs none
+ * (`needs_update`).
  *
- * Iterates through all repos, checking prod, peer, and dev dependencies to find
- * which packages will need dependency version bumps after publishing.
+ * An update is breaking when the move from the range's base version is
+ * (`to_range_update_bump`), so a range lagging its dependency's last release
+ * counts what it skips; a range with no `x.y.z` base takes the dependency's
+ * own change's breaking flag.
  *
- * Also tracks "breaking cascades" - when a breaking change propagates to dependents.
+ * @param repo - the dependent package
+ * @param targets - every package's version after the release, by name
+ * @param changes - the version changes the release makes, by name
+ * @param sections - the dependency sections to read
+ */
+export const to_dependency_updates = (
+	repo: LocalRepo,
+	targets: ReadonlyMap<string, string>,
+	changes: ReadonlyMap<string, VersionChange>,
+	sections: ReadonlyArray<DependencySection> = DEPENDENCY_SECTIONS
+): Array<DependencyUpdate> => {
+	const updates: Array<DependencyUpdate> = [];
+	for (const section of sections) {
+		const deps = to_section_dependencies(repo, section);
+		if (!deps) continue;
+		for (const [dep_name, current_version] of deps) {
+			const new_version = targets.get(dep_name);
+			if (!new_version || !needs_update(current_version, new_version)) continue;
+			const range_bump = to_range_update_bump(current_version, new_version);
+			updates.push({
+				dependent_package: repo.library.name,
+				updated_dependency: dep_name,
+				current_version,
+				new_version,
+				type: section,
+				breaking: range_bump?.breaking ?? changes.get(dep_name)?.breaking ?? false
+			});
+		}
+	}
+	return updates;
+};
+
+/**
+ * Calculates every dependency update between packages (`to_dependency_updates`
+ * for each repo, in `repos` order) and the breaking cascades: each package whose release is breaking for some dependent's
+ * prod/peer range, with those dependents.
  */
 export const calculate_dependency_updates = (
-	repos: Array<LocalRepo>,
-	predicted_versions: Map<string, string>,
-	breaking_packages: Set<string>
+	repos: ReadonlyArray<LocalRepo>,
+	targets: ReadonlyMap<string, string>,
+	changes: ReadonlyMap<string, VersionChange>
 ): {
 	dependency_updates: Array<DependencyUpdate>;
 	breaking_cascades: Map<string, Array<string>>;
 } => {
-	const dependency_updates: Array<DependencyUpdate> = [];
+	const dependency_updates = repos.flatMap((repo) => to_dependency_updates(repo, targets, changes));
 	const breaking_cascades: Map<string, Array<string>> = new Map();
-
-	for (const repo of repos) {
-		// Check prod dependencies
-		if (repo.dependencies) {
-			for (const [dep_name, current_version] of repo.dependencies) {
-				const new_version = predicted_versions.get(dep_name);
-				if (new_version && needs_update(current_version, new_version)) {
-					dependency_updates.push({
-						dependent_package: repo.library.name,
-						updated_dependency: dep_name,
-						current_version,
-						new_version,
-						type: 'dependencies'
-					});
-
-					if (breaking_packages.has(dep_name)) {
-						const cascades = breaking_cascades.get(dep_name) || [];
-						if (!cascades.includes(repo.library.name)) {
-							cascades.push(repo.library.name);
-						}
-						breaking_cascades.set(dep_name, cascades);
-					}
-				}
-			}
-		}
-
-		// Check peer dependencies
-		if (repo.peer_dependencies) {
-			for (const [dep_name, current_version] of repo.peer_dependencies) {
-				const new_version = predicted_versions.get(dep_name);
-				if (new_version && needs_update(current_version, new_version)) {
-					dependency_updates.push({
-						dependent_package: repo.library.name,
-						updated_dependency: dep_name,
-						current_version,
-						new_version,
-						type: 'peerDependencies'
-					});
-
-					if (breaking_packages.has(dep_name)) {
-						const cascades = breaking_cascades.get(dep_name) || [];
-						if (!cascades.includes(repo.library.name)) {
-							cascades.push(repo.library.name);
-						}
-						breaking_cascades.set(dep_name, cascades);
-					}
-				}
-			}
-		}
-
-		// Check dev dependencies
-		if (repo.dev_dependencies) {
-			for (const [dep_name, current_version] of repo.dev_dependencies) {
-				const new_version = predicted_versions.get(dep_name);
-				if (new_version && needs_update(current_version, new_version)) {
-					dependency_updates.push({
-						dependent_package: repo.library.name,
-						updated_dependency: dep_name,
-						current_version,
-						new_version,
-						type: 'devDependencies'
-					});
-				}
-			}
+	for (const update of dependency_updates) {
+		if (update.type === 'devDependencies' || !update.breaking) continue;
+		const affected = breaking_cascades.get(update.updated_dependency);
+		if (!affected) {
+			breaking_cascades.set(update.updated_dependency, [update.dependent_package]);
+		} else if (!affected.includes(update.dependent_package)) {
+			affected.push(update.dependent_package);
 		}
 	}
-
 	return { dependency_updates, breaking_cascades };
-};
-
-/**
- * Determines the required bump type for a package based on its dependency updates.
- *
- * Returns null if no prod/peer dependency updates, otherwise returns the minimum
- * required bump type (major for breaking deps, patch otherwise).
- *
- * Respects pre-1.0 semver conventions (minor for breaking in 0.x).
- */
-export const get_required_bump_for_dependencies = (
-	repo: LocalRepo,
-	dependency_updates: Array<DependencyUpdate>,
-	breaking_packages: Set<string>
-): BumpType | null => {
-	// Check if this repo has any prod/peer dependency updates
-	const relevant_updates = dependency_updates.filter(
-		(update) =>
-			update.dependent_package === repo.library.name &&
-			(update.type === 'dependencies' || update.type === 'peerDependencies')
-	);
-
-	if (relevant_updates.length === 0) {
-		return null;
-	}
-
-	// Check if any of these dependencies have breaking changes
-	const has_breaking_deps = relevant_updates.some((update) =>
-		breaking_packages.has(update.updated_dependency)
-	);
-
-	return required_bump_for_dependency_update(
-		repo.package_json.version || '0.0.0',
-		has_breaking_deps
-	);
 };

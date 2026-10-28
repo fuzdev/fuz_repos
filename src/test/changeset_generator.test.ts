@@ -1,13 +1,13 @@
 import { assert, describe, test } from 'vitest';
 import {
 	generate_changeset_content,
-	create_dependency_updates,
+	to_dependency_version_changes,
 	write_dependency_updates_changeset,
 	merge_dependency_updates,
 	parse_dependency_updates_changeset,
 	type DependencyVersionChange
 } from '#lib/changeset_generator.ts';
-import type { PublishedVersion } from '#lib/multi_repo_publisher.ts';
+import type { DependencyUpdate } from '#lib/publishing_plan.ts';
 import { create_mock_repo, create_mock_fs_ops } from './test_helpers.ts';
 
 describe('changeset_generator', () => {
@@ -128,176 +128,69 @@ describe('changeset_generator', () => {
 		});
 	});
 
-	describe('create_dependency_updates', () => {
-		test('creates updates from published versions', () => {
-			const dependencies = new Map([
-				['lib-a', '^1.0.0'],
-				['lib-b', '~2.0.0'],
-				['external-lib', '^3.0.0'] // not published
-			]);
+	describe('to_dependency_version_changes', () => {
+		const update = (overrides: Partial<DependencyUpdate>): DependencyUpdate => ({
+			dependent_package: 'app',
+			updated_dependency: 'lib',
+			current_version: '^1.0.0',
+			new_version: '1.0.1',
+			type: 'dependencies',
+			breaking: false,
+			...overrides
+		});
 
-			const published_versions: Map<string, PublishedVersion> = new Map([
+		test('measures each move from the range base, prefix stripped', () => {
+			assert.deepEqual(
+				to_dependency_version_changes([
+					update({ updated_dependency: 'a', current_version: '^1.0.0', new_version: '1.0.1' }),
+					update({
+						updated_dependency: 'b',
+						current_version: '>=0.54.0',
+						new_version: '0.55.1',
+						type: 'peerDependencies',
+						breaking: true
+					})
+				]),
 				[
-					'lib-a',
 					{
-						name: 'lib-a',
-						old_version: '1.0.0',
-						new_version: '1.1.0',
-						bump_type: 'minor',
-						breaking: false,
-						commit: 'abc123',
-						tag: 'v1.1.0'
-					}
-				],
-				[
-					'lib-b',
-					{
-						name: 'lib-b',
-						old_version: '2.0.0',
-						new_version: '2.0.1',
+						package_name: 'a',
+						from_version: '1.0.0',
+						to_version: '1.0.1',
 						bump_type: 'patch',
-						breaking: false,
-						commit: 'def456',
-						tag: 'v2.0.1'
+						breaking: false
+					},
+					{
+						package_name: 'b',
+						from_version: '0.54.0',
+						to_version: '0.55.1',
+						bump_type: 'minor',
+						breaking: true
 					}
 				]
-			]);
-
-			const updates = create_dependency_updates(dependencies, published_versions);
-
-			assert.strictEqual(updates.length, 2);
-
-			const lib_a_update = updates.find((u) => u.package_name === 'lib-a')!;
-			assert.deepEqual(lib_a_update, {
-				package_name: 'lib-a',
-				from_version: '1.0.0', // stripped prefix
-				to_version: '1.1.0',
-				bump_type: 'minor',
-				breaking: false
-			});
-
-			const lib_b_update = updates.find((u) => u.package_name === 'lib-b')!;
-			assert.deepEqual(lib_b_update, {
-				package_name: 'lib-b',
-				from_version: '2.0.0', // stripped prefix
-				to_version: '2.0.1',
-				bump_type: 'patch',
-				breaking: false
-			});
-
-			// Should not include external-lib (not published)
-			assert.strictEqual(
-				updates.find((u) => u.package_name === 'external-lib'),
-				undefined
 			);
 		});
 
-		test('handles breaking changes', () => {
-			const dependencies = new Map([['breaking-lib', '^0.5.0']]);
-
-			const published_versions: Map<string, PublishedVersion> = new Map([
-				[
-					'breaking-lib',
-					{
-						name: 'breaking-lib',
-						old_version: '0.5.0',
-						new_version: '0.6.0',
-						bump_type: 'minor',
-						breaking: true, // Pre-1.0 minor is breaking
-						commit: 'abc123',
-						tag: 'v0.6.0'
-					}
-				]
-			]);
-
-			const updates = create_dependency_updates(dependencies, published_versions);
-
-			assert.strictEqual(updates.length, 1);
-			assert.strictEqual(updates[0]!.breaking, true);
+		test('leaves dev updates out of the changeset', () => {
+			assert.deepEqual(to_dependency_version_changes([update({ type: 'devDependencies' })]), []);
 		});
 
-		test('strips version prefixes from current versions', () => {
-			const dependencies = new Map([
-				['caret-lib', '^1.0.0'],
-				['tilde-lib', '~1.0.0'],
-				['exact-lib', '1.0.0'],
-				['gte-lib', '>=1.0.0']
+		test('one line per dependency when it appears in two sections', () => {
+			const changes = to_dependency_version_changes([
+				update({ type: 'dependencies' }),
+				update({ type: 'peerDependencies', current_version: '>=1.0.0' })
 			]);
-
-			const published_versions: Map<string, PublishedVersion> = new Map([
-				[
-					'caret-lib',
-					{
-						name: 'caret-lib',
-						old_version: '1.0.0',
-						new_version: '1.1.0',
-						bump_type: 'minor',
-						breaking: false,
-						commit: 'abc123',
-						tag: 'v1.1.0'
-					}
-				],
-				[
-					'tilde-lib',
-					{
-						name: 'tilde-lib',
-						old_version: '1.0.0',
-						new_version: '1.0.1',
-						bump_type: 'patch',
-						breaking: false,
-						commit: 'def456',
-						tag: 'v1.0.1'
-					}
-				],
-				[
-					'exact-lib',
-					{
-						name: 'exact-lib',
-						old_version: '1.0.0',
-						new_version: '1.0.1',
-						bump_type: 'patch',
-						breaking: false,
-						commit: 'ghi789',
-						tag: 'v1.0.1'
-					}
-				],
-				[
-					'gte-lib',
-					{
-						name: 'gte-lib',
-						old_version: '1.0.0',
-						new_version: '1.0.1',
-						bump_type: 'patch',
-						breaking: false,
-						commit: 'jkl012',
-						tag: 'v1.0.1'
-					}
-				]
-			]);
-
-			const updates = create_dependency_updates(dependencies, published_versions);
-
-			// All should have stripped version prefixes
-			assert.strictEqual(
-				updates.find((u) => u.package_name === 'caret-lib')?.from_version,
-				'1.0.0'
-			);
-			assert.strictEqual(
-				updates.find((u) => u.package_name === 'tilde-lib')?.from_version,
-				'1.0.0'
-			);
-			assert.strictEqual(
-				updates.find((u) => u.package_name === 'exact-lib')?.from_version,
-				'1.0.0'
-			);
-			assert.strictEqual(updates.find((u) => u.package_name === 'gte-lib')?.from_version, '1.0.0'); // >= fully stripped
+			assert.strictEqual(changes.length, 1);
+			assert.strictEqual(changes[0]!.to_version, '1.0.1');
 		});
 
-		test('handles empty inputs', () => {
-			const empty_deps = new Map();
-			const empty_published = new Map();
+		test('a wildcard range counts as a patch', () => {
+			const [change] = to_dependency_version_changes([update({ current_version: '*' })]);
+			assert.strictEqual(change!.bump_type, 'patch');
+			assert.strictEqual(change!.from_version, '*');
+		});
 
-			assert.deepEqual(create_dependency_updates(empty_deps, empty_published), []);
+		test('nothing in, nothing out', () => {
+			assert.deepEqual(to_dependency_version_changes([]), []);
 		});
 	});
 

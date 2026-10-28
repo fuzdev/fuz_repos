@@ -105,13 +105,13 @@ export const run_gitops_analyze = async (
 	}
 
 	// Build the dependency graph and analyze cycles/wildcards (tolerating cycles)
-	const { graph, analysis, publishing_order } = analyze_repos(local_repos);
+	const { graph, analysis, levels } = analyze_repos(local_repos);
 
 	// Format and output using output_helpers
 	const data = {
 		graph,
 		analysis,
-		publishing_order
+		levels
 	};
 
 	await format_and_output(data, create_formatters(), { format, outfile, log, write_stdout });
@@ -121,14 +121,15 @@ export const run_gitops_analyze = async (
 interface AnalysisData {
 	graph: DependencyGraph;
 	analysis: DependencyAnalysis;
-	publishing_order: Array<string> | null;
+	/** The packages grouped by prod/peer dependency depth, or `null` under a production cycle. */
+	levels: Array<Array<string>> | null;
 }
 
 // Create formatters for output_helpers
 const create_formatters = (): OutputFormatters<AnalysisData> => ({
-	json: (data) => format_json(data.graph, data.analysis, data.publishing_order),
-	markdown: (data) => format_markdown(data.graph, data.analysis, data.publishing_order),
-	stdout: (data, log) => format_stdout(data.graph, data.analysis, data.publishing_order, log)
+	json: (data) => format_json(data.graph, data.analysis, data.levels),
+	markdown: (data) => format_markdown(data.graph, data.analysis, data.levels),
+	stdout: (data, log) => format_stdout(data.graph, data.analysis, data.levels, log)
 });
 
 // Helper to calculate common statistics
@@ -148,12 +149,12 @@ const calculate_stats = (graph: DependencyGraph) => {
 const format_json = (
 	graph: DependencyGraph,
 	analysis: DependencyAnalysis,
-	publishing_order: Array<string> | null
+	levels: Array<Array<string>> | null
 ): string => {
 	const output = {
 		graph: graph.toJSON(),
 		analysis,
-		publishing_order
+		levels
 	};
 	return JSON.stringify(output, null, 2);
 };
@@ -161,7 +162,7 @@ const format_json = (
 const format_markdown = (
 	graph: DependencyGraph,
 	analysis: DependencyAnalysis,
-	publishing_order: Array<string> | null
+	levels: Array<Array<string>> | null
 ): Array<string> => {
 	const lines: Array<string> = ['# Dependency Analysis'];
 
@@ -176,13 +177,19 @@ const format_markdown = (
 	lines.push(`- **Production/peer cycles**: ${analysis.production_cycles.length}`);
 	lines.push(`- **Dev cycles**: ${analysis.dev_cycles.length}`);
 
-	// Publishing order
-	if (publishing_order) {
-		lines.push('', '## Publishing Order', '');
-		publishing_order.forEach((name, i) => {
-			const node = graph.get_node(name);
-			const version = node ? `v${node.version}` : '';
-			lines.push(`${i + 1}. \`${name}\` ${version}`);
+	// Dependency levels
+	if (levels) {
+		lines.push('', '## Dependency Levels', '');
+		lines.push(
+			"*Each level depends only on the levels before it, so a level's packages publish together:*"
+		);
+		lines.push('');
+		levels.forEach((level, i) => {
+			const names = level.map((name) => {
+				const node = graph.get_node(name);
+				return node ? `\`${name}\` v${node.version}` : `\`${name}\``;
+			});
+			lines.push(`${i + 1}. ${names.join(', ')}`);
 		});
 	}
 
@@ -236,18 +243,20 @@ const format_markdown = (
 const format_stdout = (
 	graph: DependencyGraph,
 	analysis: DependencyAnalysis,
-	publishing_order: Array<string> | null,
+	levels: Array<Array<string>> | null,
 	log: Logger
 ): void => {
 	log.info(st('cyan', `📊 Analyzing ${graph.nodes.size} repositories...`));
 
-	// Publishing order
-	if (publishing_order) {
-		log.info(st('yellow', 'Publishing order:'));
-		publishing_order.forEach((name, i) => {
-			const node = graph.get_node(name);
-			const version = node ? node.version : 'unknown';
-			log.info(`  ${st('dim', `${i + 1}.`)} ${name} ${st('dim', `(${version})`)}`);
+	// Dependency levels
+	if (levels) {
+		log.info(st('yellow', 'Dependency levels (each depends only on the ones above):'));
+		levels.forEach((level, i) => {
+			const names = level.map((name) => {
+				const node = graph.get_node(name);
+				return `${name} ${st('dim', `(${node ? node.version : 'unknown'})`)}`;
+			});
+			log.info(`  ${st('dim', `${i + 1}.`)} ${names.join(', ')}`);
 		});
 		log.info('');
 	}
@@ -288,7 +297,7 @@ const format_stdout = (
 	if (!has_prod_cycles && !has_dev_cycles) {
 		log.info(st('green', '✅ No circular dependencies detected'));
 	} else if (!has_prod_cycles) {
-		log.info(st('green', '✓ Publishing order computed successfully (dev deps excluded)'));
+		log.info(st('green', '✓ Dependency levels computed successfully (dev deps excluded)'));
 	}
 
 	// Summary

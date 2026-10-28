@@ -5,7 +5,7 @@ import type { RepoFixtureSet } from '../repo_fixture_types.ts';
  * All packages are independent and can be published in any order.
  *
  * This validates:
- * - Publishing order with no dependencies (any order is valid)
+ * - No dependencies, so one wave (any topological order is valid)
  * - Multiple independent version bumps
  * - No breaking cascades
  * - Mix of explicit changesets and no changes
@@ -88,10 +88,12 @@ Breaking API change`
 	],
 
 	expected_outcomes: {
-		// Publishing order: all packages are independent, so order is non-deterministic
+		// Topological order: all packages are independent, so order is non-deterministic
 		// but all should appear
-		publishing_order: ['@test/util_d', '@test/util_c', '@test/util_b', '@test/util_a'],
+		order: ['@test/util_d', '@test/util_c', '@test/util_b', '@test/util_a'],
 
+		// each wave publishes together, after the ones before it
+		waves: [['@test/util_a', '@test/util_b', '@test/util_c']],
 		version_changes: [
 			{
 				package_name: '@test/util_a',

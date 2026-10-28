@@ -63,10 +63,12 @@ Bug fix in pkg_b`
 	],
 
 	expected_outcomes: {
-		// Publishing order cannot be determined due to cycle
-		publishing_order: [],
+		// No order can be determined due to the cycle
+		order: [],
 
 		// No version changes should occur when there's an error
+		// each wave publishes together, after the ones before it
+		waves: [],
 		version_changes: [],
 
 		breaking_cascades: {},

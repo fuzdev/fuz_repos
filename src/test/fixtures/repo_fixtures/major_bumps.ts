@@ -106,7 +106,7 @@ Small fix (will escalate to major due to dependencies)`
 	],
 
 	expected_outcomes: {
-		publishing_order: [
+		order: [
 			'@test/stable',
 			'@test/unstable',
 			'@test/complex_app',
@@ -114,6 +114,11 @@ Small fix (will escalate to major due to dependencies)`
 			'@test/app_using_unstable'
 		],
 
+		// each wave publishes together, after the ones before it
+		waves: [
+			['@test/unstable', '@test/stable'],
+			['@test/app_using_unstable', '@test/app_using_stable', '@test/complex_app']
+		],
 		version_changes: [
 			{
 				package_name: '@test/unstable',

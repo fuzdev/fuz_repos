@@ -160,7 +160,7 @@ export const create_mock_gitops_ops = (
 		readFile: async () => ({ ok: true, value: '{}' }),
 		writeFile: async () => ({ ok: true }),
 		mkdir: async () => ({ ok: true }),
-		exists: async () => true,
+		exists: async () => false,
 		...overrides.fs
 	},
 	build: create_mock_build_ops(overrides.build),

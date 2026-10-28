@@ -689,6 +689,62 @@ test('handles mixed prod and dev deps on same package', async () => {
 	);
 });
 
+test('a dependent gets one auto-changeset for every dependency that publishes', async () => {
+	const repos: Array<LocalRepo> = [
+		create_mock_repo({ name: 'util', version: '0.1.0' }),
+		create_mock_repo({ name: 'css', version: '0.1.0', peer_deps: { util: '>=0.1.0' } }),
+		create_mock_repo({
+			name: 'ui',
+			version: '0.1.0',
+			peer_deps: { util: '>=0.1.0', css: '>=0.1.0' }
+		})
+	];
+	const fs = create_populated_fs_ops(
+		repos,
+		new Map([
+			['util', '0.2.0'],
+			['css', '0.2.0'],
+			['ui', '0.2.0']
+		])
+	);
+	const written: Array<string> = [];
+	const base_write = fs.writeFile;
+	fs.writeFile = async (options) => {
+		written.push(options.path);
+		return base_write(options);
+	};
+	const commits: Array<{ cwd: string; message: string }> = [];
+	const mock_ops = create_mock_gitops_ops({
+		changeset: {
+			has_changesets: async (options) => ({
+				ok: true,
+				value: options.repo.library.name === 'util'
+			}),
+			predict_next_version: async () => ({ ok: true, version: '0.2.0', bump_type: 'minor' })
+		},
+		fs,
+		git: create_mock_git_ops({
+			commit: async (options) => {
+				commits.push({ cwd: options.cwd ?? '', message: options.message });
+				return { ok: true };
+			}
+		})
+	});
+
+	const result = await publish_repos(repos, { wetrun: true, ops: mock_ops });
+
+	assert.strictEqual(result.ok, true);
+	const ui_changesets = new Set(written.filter((p) => p.startsWith('/test/ui/.changeset/')));
+	assert.deepEqual([...ui_changesets], ['/test/ui/.changeset/dependency-updates.md']);
+	const content = fs.get('/test/ui/.changeset/dependency-updates.md')!;
+	assert.include(content, '- util: 0.1.0 → 0.2.0 (minor)');
+	assert.include(content, '- css: 0.1.0 → 0.2.0 (minor)');
+	assert.deepEqual(
+		commits.filter((c) => c.cwd === '/test/ui').map((c) => c.message),
+		['update dependencies: util 0.2.0', 'update dependencies: css 0.2.0']
+	);
+});
+
 test("a dependent's failed rewrite is the dependent's failure, after its dependency published", async () => {
 	const repos: Array<LocalRepo> = [
 		create_mock_repo({ name: 'core', version: '1.0.0' }),

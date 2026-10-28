@@ -58,6 +58,15 @@ Packages can publish in four distinct scenarios:
 - Behavior: Changeset auto-generated, package republished
 - Reported as: "Version Changes (auto-generated for dependency updates)"
 - Example: `gro` publishes → `fuz` depends on `gro` → auto-changeset for `fuz`
+- One file per dependent, `.changeset/dependency-updates.md`: each
+  dependency that publishes merges into it (its first `from`, its latest
+  `to`, the bump recomputed), so the release notes carry one entry listing
+  every dependency that moved. A run that stopped before the dependent
+  published leaves the file for the next run to merge into. Each rewrite is
+  its own commit, `update dependencies: <name> <version>`, so an interrupted
+  run keeps what it did
+- A package with changesets of its own gets the same file beside them when a
+  prod/peer dependency publishes
 - Never an escalation: when a dependency turns breaking in a later pass (a
   dependent listed before its dependency in the config), the auto-generated
   change is raised to the bump that requires and stays in this group

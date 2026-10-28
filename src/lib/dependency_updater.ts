@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import type { LocalRepo } from './local_repo.ts';
 import type { PublishedVersion } from './multi_repo_publisher.ts';
 import {
-	create_changeset_for_dependency_updates,
+	write_dependency_updates_changeset,
 	create_dependency_updates
 } from './changeset_generator.ts';
 import { to_updated_range, type VersionStrategy } from './version_utils.ts';
@@ -29,8 +29,9 @@ const DEPENDENCY_SECTIONS = ['dependencies', 'devDependencies', 'peerDependencie
  *    devDependencies, peerDependencies), so a package that is both a peer and a
  *    dev dependency moves in one commit
  * 2. Writes updated `package.json` with tabs formatting
- * 3. Creates auto-changeset if `published_versions` provided (for transitive updates)
- * 4. Commits both `package.json` and changeset with standard message
+ * 3. Writes the dependent's one auto-changeset if `published_versions` is provided,
+ *    merging into it when an earlier publish wrote it (`write_dependency_updates_changeset`)
+ * 4. Commits both `package.json` and changeset, the message naming each updated version
  *
  * Each range keeps its existing prefix, else takes the strategy's (`to_updated_range`).
  * When no entry's value changes — every range already names its version — it writes,
@@ -62,7 +63,8 @@ export const update_package_json = async (
 	}
 	const package_json = JSON.parse(content_result.value);
 
-	let updated = false;
+	// the versions some entry actually moved to, for the commit message
+	const moved: Map<string, string> = new Map();
 	for (const section of DEPENDENCY_SECTIONS) {
 		const deps: Record<string, string> | undefined = package_json[section];
 		if (!deps) continue;
@@ -71,11 +73,11 @@ export const update_package_json = async (
 			const next = to_updated_range(deps[name]!, version, strategy);
 			if (next === deps[name]) continue;
 			deps[name] = next;
-			updated = true;
+			moved.set(name, version);
 		}
 	}
 
-	if (!updated) {
+	if (moved.size === 0) {
 		// a republishing dependent always has a range to move: the plan read this file and saw
 		// it behind, so an unchanged one means it changed since — fail rather than skip its changeset
 		if (published_versions) {
@@ -116,11 +118,10 @@ export const update_package_json = async (
 		const dependency_updates = create_dependency_updates(all_deps, published_versions);
 
 		if (dependency_updates.length > 0) {
-			const changeset_path = await create_changeset_for_dependency_updates(
-				repo,
-				dependency_updates,
-				{ log, fs_ops }
-			);
+			const changeset_path = await write_dependency_updates_changeset(repo, dependency_updates, {
+				log,
+				fs_ops
+			});
 
 			// Add changeset to git
 			const add_result = await git_ops.add({ files: changeset_path, cwd: repo.repo_dir });
@@ -140,7 +141,7 @@ export const update_package_json = async (
 
 	// commit only what this staged, so nothing else in the index rides along
 	const commit_result = await git_ops.commit({
-		message: `update dependencies after publishing`,
+		message: to_dependency_update_commit_message(moved),
 		files: staged,
 		cwd: repo.repo_dir
 	});
@@ -148,3 +149,16 @@ export const update_package_json = async (
 		throw new Error(`Failed to commit: ${commit_result.message}`);
 	}
 };
+
+/**
+ * The commit message for a dependency rewrite, naming each dependency and the
+ * version it moved to, so the history says what each of a cascade's commits did.
+ *
+ * @example
+ * ```ts
+ * to_dependency_update_commit_message(new Map([['@fuzdev/fuz_util', '0.79.0']]))
+ * // 'update dependencies: @fuzdev/fuz_util 0.79.0'
+ * ```
+ */
+export const to_dependency_update_commit_message = (updates: Map<string, string>): string =>
+	`update dependencies: ${Array.from(updates, ([name, version]) => `${name} ${version}`).join(', ')}`;

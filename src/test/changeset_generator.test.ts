@@ -2,7 +2,9 @@ import { assert, describe, test } from 'vitest';
 import {
 	generate_changeset_content,
 	create_dependency_updates,
-	create_changeset_for_dependency_updates,
+	write_dependency_updates_changeset,
+	merge_dependency_updates,
+	parse_dependency_updates_changeset,
 	type DependencyVersionChange
 } from '#lib/changeset_generator.ts';
 import type { PublishedVersion } from '#lib/multi_repo_publisher.ts';
@@ -299,7 +301,7 @@ describe('changeset_generator', () => {
 		});
 	});
 
-	describe('create_changeset_for_dependency_updates', () => {
+	describe('write_dependency_updates_changeset', () => {
 		test('writes a changeset file under .changeset and returns its path', async () => {
 			const repo = create_mock_repo({ name: 'pkg', version: '1.0.0' });
 			const fs = create_mock_fs_ops();
@@ -313,9 +315,9 @@ describe('changeset_generator', () => {
 				}
 			];
 
-			const path = await create_changeset_for_dependency_updates(repo, updates, { fs_ops: fs });
+			const path = await write_dependency_updates_changeset(repo, updates, { fs_ops: fs });
 
-			assert.match(path, /\/test\/pkg\/\.changeset\/dependency-update-.+\.md$/);
+			assert.strictEqual(path, '/test/pkg/.changeset/dependency-updates.md');
 			const content = fs.get(path);
 			assert.ok(content);
 			// pkg is 1.0.0 and the dep change is breaking → required bump is major
@@ -333,7 +335,7 @@ describe('changeset_generator', () => {
 				return base_mkdir(options);
 			};
 
-			await create_changeset_for_dependency_updates(
+			await write_dependency_updates_changeset(
 				repo,
 				[
 					{
@@ -348,6 +350,197 @@ describe('changeset_generator', () => {
 			);
 
 			assert.strictEqual(mkdir_path, '/test/pkg/.changeset');
+		});
+
+		const change = (
+			package_name: string,
+			from_version: string,
+			to_version: string,
+			breaking = true
+		): DependencyVersionChange => ({
+			package_name,
+			from_version,
+			to_version,
+			bump_type: 'minor',
+			breaking
+		});
+
+		test('merges each publish into the one changeset', async () => {
+			const repo = create_mock_repo({ name: 'ui', version: '0.220.0' });
+			const fs = create_mock_fs_ops();
+
+			await write_dependency_updates_changeset(repo, [change('util', '0.78.0', '0.79.0')], {
+				fs_ops: fs
+			});
+			const path = await write_dependency_updates_changeset(
+				repo,
+				[change('css', '0.71.1', '0.72.0')],
+				{ fs_ops: fs }
+			);
+
+			const content = fs.get(path)!;
+			assert.strictEqual(content.match(/^"ui": minor$/gm)?.length, 1);
+			assert.deepEqual(
+				parse_dependency_updates_changeset(content, 'ui')?.updates.map((u) => u.package_name),
+				['util', 'css']
+			);
+		});
+
+		test('keeps a bump raised by hand in the frontmatter', async () => {
+			const repo = create_mock_repo({ name: 'pkg', version: '1.0.0' });
+			const fs = create_mock_fs_ops();
+			const path = await write_dependency_updates_changeset(
+				repo,
+				[change('a', '1.0.0', '1.0.1', false)],
+				{ fs_ops: fs }
+			);
+			fs.set(path, fs.get(path)!.replace('"pkg": patch', '"pkg": major'));
+
+			await write_dependency_updates_changeset(repo, [change('b', '2.0.0', '2.0.1', false)], {
+				fs_ops: fs
+			});
+
+			assert.include(fs.get(path)!, '"pkg": major');
+		});
+
+		test("refuses to overwrite a file at its name that isn't its own", async () => {
+			const repo = create_mock_repo({ name: 'pkg', version: '1.0.0' });
+			const fs = create_mock_fs_ops();
+			fs.set(
+				'/test/pkg/.changeset/dependency-updates.md',
+				'---\n"pkg": patch\n---\n\nhand-written\n'
+			);
+
+			let error: unknown;
+			try {
+				await write_dependency_updates_changeset(repo, [change('dep', '1.0.0', '2.0.0')], {
+					fs_ops: fs
+				});
+			} catch (e) {
+				error = e;
+			}
+
+			assert(error instanceof Error);
+			assert.include(error.message, "isn't an auto-generated dependency changeset");
+			assert.include(fs.get('/test/pkg/.changeset/dependency-updates.md')!, 'hand-written');
+		});
+	});
+
+	describe('parse_dependency_updates_changeset', () => {
+		test('reads back what generate_changeset_content wrote', () => {
+			const updates: Array<DependencyVersionChange> = [
+				{
+					package_name: '@scope/a',
+					from_version: '1.0.0',
+					to_version: '2.0.0',
+					bump_type: 'major',
+					breaking: true
+				},
+				{
+					package_name: 'b',
+					from_version: '1.0.0',
+					to_version: '1.0.1',
+					bump_type: 'patch',
+					breaking: false
+				}
+			];
+			const content = generate_changeset_content('pkg', updates, 'major');
+			assert.deepEqual(parse_dependency_updates_changeset(content, 'pkg'), {
+				bump_type: 'major',
+				updates
+			});
+			assert.deepEqual(
+				parse_dependency_updates_changeset(content.replaceAll('\n', '\r\n'), 'pkg')?.updates,
+				updates
+			);
+		});
+
+		test('round-trips a range with spaces', () => {
+			const updates: Array<DependencyVersionChange> = [
+				{
+					package_name: 'a',
+					from_version: '1.0.0 - 2.0.0',
+					to_version: '2.1.0',
+					bump_type: 'minor',
+					breaking: false
+				}
+			];
+			const content = generate_changeset_content('pkg', updates, 'patch');
+			assert.deepEqual(parse_dependency_updates_changeset(content, 'pkg')?.updates, updates);
+		});
+
+		test('rejects anything it did not write', () => {
+			const ours = generate_changeset_content(
+				'pkg',
+				[
+					{
+						package_name: 'a',
+						from_version: '1.0.0',
+						to_version: '1.1.0',
+						bump_type: 'minor',
+						breaking: false
+					}
+				],
+				'patch'
+			);
+			assert.ok(parse_dependency_updates_changeset(ours, 'pkg'));
+			for (const content of [
+				'---\n"pkg": patch\n---\n\nfix: a thing\n',
+				ours.replace('Updated dependencies:', 'Updated dependencies:\nsome prose'),
+				ours + '\na note added by hand\n'
+			]) {
+				assert.strictEqual(parse_dependency_updates_changeset(content, 'pkg'), null);
+			}
+			// another package's
+			assert.strictEqual(parse_dependency_updates_changeset(ours, 'other'), null);
+		});
+	});
+
+	describe('merge_dependency_updates', () => {
+		test('keeps the first from_version and takes the later to_version and larger bump', () => {
+			const merged = merge_dependency_updates(
+				[
+					{
+						package_name: 'a',
+						from_version: '1.0.0',
+						to_version: '1.0.1',
+						bump_type: 'patch',
+						breaking: false
+					}
+				],
+				[
+					{
+						package_name: 'a',
+						from_version: '1.0.1',
+						to_version: '2.0.0',
+						bump_type: 'major',
+						breaking: true
+					},
+					{
+						package_name: 'b',
+						from_version: '3.0.0',
+						to_version: '3.1.0',
+						bump_type: 'minor',
+						breaking: false
+					}
+				]
+			);
+			assert.deepEqual(merged, [
+				{
+					package_name: 'a',
+					from_version: '1.0.0',
+					to_version: '2.0.0',
+					bump_type: 'major',
+					breaking: true
+				},
+				{
+					package_name: 'b',
+					from_version: '3.0.0',
+					to_version: '3.1.0',
+					bump_type: 'minor',
+					breaking: false
+				}
+			]);
 		});
 	});
 });

@@ -403,7 +403,7 @@ describe('dependency_updater', () => {
 
 			assert.ok(git_ops.added_files.includes('package.json'));
 			assert.strictEqual(git_ops.commits.length, 1);
-			assert.ok(git_ops.commits[0]!.includes('update dependencies after publishing'));
+			assert.strictEqual(git_ops.commits[0], 'update dependencies: dep-a 1.1.0');
 			// only what it staged, so nothing else in the index rides along
 			assert.deepEqual(git_ops.committed_files, [['package.json']]);
 		});

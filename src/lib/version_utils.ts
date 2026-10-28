@@ -97,6 +97,31 @@ export const get_update_prefix = (
 };
 
 /**
+ * How a rewritten range is prefixed when the current one has no prefix of its
+ * own (an existing prefix is always kept).
+ */
+export type VersionStrategy = 'exact' | 'caret' | 'tilde' | 'gte';
+
+export const to_version_strategy_prefix = (strategy: VersionStrategy): '' | '^' | '~' | '>=' =>
+	strategy === 'exact' ? '' : strategy === 'caret' ? '^' : strategy === 'gte' ? '>=' : '~';
+
+/**
+ * The range a dependency entry is rewritten to when `version` publishes: the
+ * current range's prefix kept (see `get_update_prefix`), else the strategy's.
+ * The executor writes it and the plan shows it, so the two agree.
+ *
+ * @example
+ * ```ts
+ * to_updated_range('>=0.78.0', '0.79.0') // '>=0.79.0'
+ * ```
+ */
+export const to_updated_range = (
+	current: string,
+	version: string,
+	strategy: VersionStrategy = 'caret'
+): string => get_update_prefix(current, to_version_strategy_prefix(strategy)) + version;
+
+/**
  * Determines if a bump is a breaking change based on semver rules.
  * Pre-1.0: minor bumps are breaking
  * 1.0+: major bumps are breaking

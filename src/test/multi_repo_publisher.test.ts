@@ -658,16 +658,146 @@ test('handles mixed prod and dev deps on same package', async () => {
 	];
 
 	const mock_fs_ops = create_populated_fs_ops(repos);
+	const committed: Array<string> = [];
 
 	const mock_ops = create_mock_gitops_ops({
-		fs: mock_fs_ops
+		fs: mock_fs_ops,
+		git: create_mock_git_ops({
+			commit: async (options) => {
+				committed.push(options.cwd ?? '');
+				return { ok: true };
+			}
+		})
 	});
 
-	// dependency updates run during publishing; the mock fs/ops cover the cascade
 	const result = await publish_repos(repos, { wetrun: true, ops: mock_ops });
 
-	// Test succeeds if publishing completes
 	assert.strictEqual(result.ok, true);
+	// the prod rewrite moved both entries; the dev pass has nothing left to commit for app
+	// (real git refuses an empty commit), so app is committed once
+	const app_package_json = JSON.parse(mock_fs_ops.get('/test/app/package.json')!);
+	assert.strictEqual(app_package_json.dependencies.shared, '^1.0.1');
+	assert.strictEqual(app_package_json.devDependencies.shared, '^1.0.1');
+	assert.deepEqual(
+		committed.filter((cwd) => cwd === '/test/app'),
+		['/test/app']
+	);
+	assert.ok(
+		!result.events.some(
+			(e) => e.event === 'dependency_updated' && e.dependent === 'app' && e.dep_type === 'dev'
+		)
+	);
+});
+
+test("a dependent's failed rewrite is the dependent's failure, after its dependency published", async () => {
+	const repos: Array<LocalRepo> = [
+		create_mock_repo({ name: 'core', version: '1.0.0' }),
+		create_mock_repo({ name: 'app', version: '1.0.0', deps: { core: '^1.0.0' } })
+	];
+	const mock_ops = create_mock_gitops_ops({
+		changeset: {
+			has_changesets: async (options) => ({ ok: true, value: options.repo.library.name === 'core' })
+		},
+		fs: create_populated_fs_ops(repos),
+		git: create_mock_git_ops({
+			commit: async () => ({ ok: false, message: 'nothing to commit' })
+		})
+	});
+
+	const result = await publish_repos(repos, { wetrun: true, ops: mock_ops });
+
+	assert.strictEqual(result.ok, false);
+	assert.deepEqual(
+		result.published.map((p) => p.name),
+		['core']
+	);
+	const failure = result.events.find((e) => e.event === 'package_failed');
+	assert(failure?.event === 'package_failed');
+	assert.strictEqual(failure.name, 'app');
+	assert.strictEqual(failure.code, 'dependency_update');
+	// app's republish never ran
+	assert.ok(!result.events.some((e) => e.event === 'package_completed' && e.name === 'app'));
+});
+
+test('a failed dev-dependency rewrite is reported and the dev pass goes on', async () => {
+	const repos: Array<LocalRepo> = [
+		create_mock_repo({ name: 'tool', version: '1.0.0' }),
+		create_mock_repo({ name: 'a', version: '1.0.0', dev_deps: { tool: '^1.0.0' } }),
+		create_mock_repo({ name: 'b', version: '1.0.0', dev_deps: { tool: '^1.0.0' } })
+	];
+	const fs = create_populated_fs_ops(repos);
+	const mock_ops = create_mock_gitops_ops({
+		changeset: {
+			has_changesets: async (options) => ({ ok: true, value: options.repo.library.name === 'tool' })
+		},
+		fs,
+		git: create_mock_git_ops({
+			commit: async (options) =>
+				options.cwd === '/test/a' ? { ok: false, message: 'index locked' } : { ok: true }
+		})
+	});
+
+	const result = await publish_repos(repos, { wetrun: true, ops: mock_ops });
+
+	assert.strictEqual(result.ok, false);
+	const failure = result.events.find((e) => e.event === 'package_failed');
+	assert(failure?.event === 'package_failed');
+	assert.strictEqual(failure.name, 'a');
+	assert.strictEqual(failure.code, 'dependency_update');
+	assert.strictEqual(JSON.parse(fs.get('/test/b/package.json')!).devDependencies.tool, '^1.0.1');
+	assert.ok(result.events.some((e) => e.event === 'run_finished'));
+});
+
+test("a dependent whose rewrite failed takes no dev bump and isn't deployed", async () => {
+	const repos: Array<LocalRepo> = [
+		// tool → core → app in prod order; app and site carry dev deps on tool
+		create_mock_repo({ name: 'tool', version: '1.0.0' }),
+		create_mock_repo({ name: 'core', version: '1.0.0', deps: { tool: '^1.0.0' } }),
+		create_mock_repo({
+			name: 'app',
+			version: '1.0.0',
+			deps: { core: '^1.0.0' },
+			dev_deps: { tool: '^1.0.0' }
+		}),
+		create_mock_repo({ name: 'site', version: '1.0.0', dev_deps: { tool: '^1.0.0' } })
+	];
+	const { ops: process_ops, get_commands_by_type } = create_tracking_process_ops();
+	const committed: Array<string> = [];
+	const mock_ops = create_mock_gitops_ops({
+		changeset: {
+			has_changesets: async (options) => ({
+				ok: true,
+				value: options.repo.library.name === 'tool' || options.repo.library.name === 'core'
+			})
+		},
+		process: process_ops,
+		fs: create_populated_fs_ops(repos),
+		git: create_mock_git_ops({
+			commit: async (options) => {
+				if (options.cwd === '/test/app') return { ok: false, message: 'index locked' };
+				committed.push(options.cwd ?? '');
+				return { ok: true };
+			}
+		})
+	});
+
+	const result = await publish_repos(repos, { wetrun: true, deploy: true, ops: mock_ops });
+
+	assert.strictEqual(result.ok, false);
+	const failures = result.events.filter((e) => e.event === 'package_failed');
+	assert.strictEqual(failures.length, 1); // app's prod rewrite, not overwritten by a dev failure
+	assert(failures[0]?.event === 'package_failed');
+	assert.strictEqual(failures[0].name, 'app');
+	// site still takes its dev bump; app takes none
+	assert.ok(committed.includes('/test/site'));
+	assert.ok(
+		!result.events.some(
+			(e) => e.event === 'dependency_updated' && e.dependent === 'app' && e.dep_type === 'dev'
+		)
+	);
+	const deployed = get_commands_by_type('deploy').map((c) => c.cwd);
+	assert.ok(!deployed.includes('/test/app'));
+	assert.ok(deployed.includes('/test/site'));
 });
 
 test('reports correct duration in result', async () => {
@@ -1521,6 +1651,37 @@ describe('execute_publishing_plan', () => {
 				make_dep_update('consumer', 'core', 'devDependencies', '1.1.0')
 			]
 		});
+		await assert_preview_matches_execution(repos, plan);
+	});
+
+	test('preview matches execution: a peer that is also a dev dependency moves once', async () => {
+		const repos = [
+			create_mock_repo({ name: 'core', version: '0.1.0' }),
+			create_mock_repo({
+				name: 'ui',
+				version: '0.1.0',
+				peer_deps: { core: '>=0.1.0' },
+				dev_deps: { core: '^0.1.0' }
+			})
+		];
+		const plan = make_plan({
+			publishing_order: ['core', 'ui'],
+			version_changes: [
+				make_version_change({ package_name: 'core', to: '0.2.0', bump_type: 'minor' }),
+				make_version_change({
+					package_name: 'ui',
+					to: '0.2.0',
+					bump_type: 'minor',
+					has_changesets: false,
+					will_generate_changeset: true
+				})
+			],
+			dependency_updates: [
+				make_dep_update('ui', 'core', 'peerDependencies', '0.2.0'),
+				make_dep_update('ui', 'core', 'devDependencies', '0.2.0')
+			]
+		});
+		assert.ok(!derive_publish_steps(plan).some((step) => step.kind === 'dev_dep_update'));
 		await assert_preview_matches_execution(repos, plan);
 	});
 

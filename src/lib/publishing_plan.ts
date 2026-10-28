@@ -55,6 +55,24 @@ export interface DependencyUpdate {
 	type: 'dependencies' | 'devDependencies' | 'peerDependencies';
 }
 
+/**
+ * Whether a dev-dependency update rides along with a prod/peer update of the
+ * same dependency in the same package. The publish pass rewrites every section
+ * that names a published dependency (`update_package_json`), so such a dev
+ * entry has already moved by the dev-dependency pass, which skips it.
+ */
+export const dev_update_rides_along = (
+	update: DependencyUpdate,
+	dependency_updates: Array<DependencyUpdate>
+): boolean =>
+	update.type === 'devDependencies' &&
+	dependency_updates.some(
+		(u) =>
+			u.type !== 'devDependencies' &&
+			u.dependent_package === update.dependent_package &&
+			u.updated_dependency === update.updated_dependency
+	);
+
 // Verbose data types for diagnostic output
 export interface VerboseChangesetDetail {
 	package_name: string;
@@ -78,9 +96,10 @@ export interface VerboseIteration {
 	new_changes: number;
 }
 
-export interface VerbosePropagationChain {
+/** A breaking package and the direct prod/peer dependents its publish rewrites. */
+export interface VerbosePropagation {
 	source: string;
-	chain: Array<{ pkg: string; dep_type: 'prod' | 'peer'; action: string }>;
+	dependents: Array<{ pkg: string; dep_type: 'prod' | 'peer'; action: string }>;
 }
 
 export interface VerboseGraphSummary {
@@ -95,7 +114,7 @@ export interface VerboseGraphSummary {
 export interface VerboseData {
 	changeset_details: Array<VerboseChangesetDetail>;
 	iterations: Array<VerboseIteration>;
-	propagation_chains: Array<VerbosePropagationChain>;
+	propagations: Array<VerbosePropagation>;
 	graph_summary: VerboseGraphSummary;
 	total_iterations: number;
 }
@@ -642,10 +661,10 @@ interface PlanVerboseDataOptions {
 const plan_verbose_data = (options: PlanVerboseDataOptions): VerboseData => {
 	const { graph, version_changes, dependency_updates, breaking_cascades } = options;
 
-	// Build propagation chains from breaking_cascades
-	const propagation_chains: Array<VerbosePropagationChain> = [];
+	// Each breaking source with its direct dependents, from breaking_cascades
+	const propagations: Array<VerbosePropagation> = [];
 	for (const [source, affected] of breaking_cascades) {
-		const chain: Array<{ pkg: string; dep_type: 'prod' | 'peer'; action: string }> = [];
+		const dependents: VerbosePropagation['dependents'] = [];
 		for (const pkg of affected) {
 			// Determine dep type and action
 			const update = dependency_updates.find(
@@ -656,10 +675,10 @@ const plan_verbose_data = (options: PlanVerboseDataOptions): VerboseData => {
 			const kind = version_change && version_change_kind(version_change);
 			const action =
 				kind === 'auto' ? 'auto-changeset' : kind === 'escalation' ? 'bump escalation' : 'update';
-			chain.push({ pkg, dep_type, action });
+			dependents.push({ pkg, dep_type, action });
 		}
-		if (chain.length > 0) {
-			propagation_chains.push({ source, chain });
+		if (dependents.length > 0) {
+			propagations.push({ source, dependents });
 		}
 	}
 
@@ -689,7 +708,7 @@ const plan_verbose_data = (options: PlanVerboseDataOptions): VerboseData => {
 	return {
 		changeset_details: options.changeset_details,
 		iterations: options.iterations,
-		propagation_chains,
+		propagations,
 		graph_summary: {
 			package_count: graph.nodes.size,
 			internal_dep_count,

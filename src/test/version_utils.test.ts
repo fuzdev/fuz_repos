@@ -9,10 +9,30 @@ import {
 	get_update_prefix,
 	is_breaking_change,
 	detect_bump_type,
-	required_bump_for_dependency_update
+	required_bump_for_dependency_update,
+	to_updated_range
 } from '#lib/version_utils.ts';
 
 describe('version_utils', () => {
+	describe('to_updated_range', () => {
+		test('keeps an existing prefix', () => {
+			assert.strictEqual(to_updated_range('>=0.78.0', '0.79.0'), '>=0.79.0');
+			assert.strictEqual(to_updated_range('^0.78.0', '0.79.0', 'exact'), '^0.79.0');
+			assert.strictEqual(to_updated_range('~1.2.0', '1.3.0', 'gte'), '~1.3.0');
+		});
+
+		test("gives an unprefixed range the strategy's prefix, caret by default", () => {
+			assert.strictEqual(to_updated_range('1.0.0', '1.1.0'), '^1.1.0');
+			assert.strictEqual(to_updated_range('1.0.0', '1.1.0', 'exact'), '1.1.0');
+			assert.strictEqual(to_updated_range('1.0.0', '1.1.0', 'tilde'), '~1.1.0');
+			assert.strictEqual(to_updated_range('1.0.0', '1.1.0', 'gte'), '>=1.1.0');
+		});
+
+		test('replaces a wildcard with a caret range', () => {
+			assert.strictEqual(to_updated_range('*', '2.0.0', 'exact'), '^2.0.0');
+		});
+	});
+
 	describe('is_wildcard', () => {
 		test('detects wildcard versions', () => {
 			assert.strictEqual(is_wildcard('*'), true);

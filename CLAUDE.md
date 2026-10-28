@@ -320,13 +320,18 @@ Publishing intentionally leaves the workspace dirty when failures occur:
 
 - Auto-changesets are created and committed DURING the publishing pass
 - If publishing fails mid-way — a publish error, an npm-propagation timeout, a
-  plan/reality drift, or a re-check that found the repo no longer ready
-  (`not_ready`) — some packages are published, others are not
+  plan/reality drift, a re-check that found the repo no longer ready
+  (`not_ready`), or a failed rewrite of a dependent's `package.json`
+  (`dependency_update`) — some packages are published, others are not
 - The dirty workspace state shows exactly what succeeded/failed
 - This enables **natural resumption**: just fix the issue and re-run the same
   command, which re-plans from the current state
 - Already-published packages have no changesets → drop out of the new plan
 - Failed packages still have changesets → retried automatically
+- A published package's dependents its failure left unrewritten (`drift`,
+  a timed-out npm wait, `dependency_update`) don't resume on their own:
+  update their ranges by hand or add a changeset first
+  ([troubleshooting](docs/troubleshooting.md))
 - Commits the run made that no release pushed (dependency rewrites and
   auto-changesets in repos it didn't publish, private update-only leaves, and
   every dev-dep bump, which lands after all publishes) leave those branches

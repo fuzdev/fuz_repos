@@ -242,6 +242,26 @@ can be slow. Either:
   rewritten, and the re-run won't do it: update their ranges by hand, or add a
   changeset to them
 
+### "Failed to update …'s dependencies: …"
+
+After a package publishes, the executor rewrites each dependent's
+`package.json` and commits it, with an auto-changeset when the dependent
+republishes. This failure (code `dependency_update`) names the dependent whose
+rewrite failed; the package that just published stays published. A prod/peer rewrite
+failing stops the run; a dev-dependency one, after every publish, is reported
+and the other repos' dev bumps go on.
+
+The failed dependent may hold a written `package.json` and a staged
+changeset — check its `git status` and commit or restore them. Then update
+the remaining ranges by hand, or add a changeset to it, before re-running
+`gro gitops_publish --wetrun`: the published package has no changesets left,
+so the re-plan won't rewrite its dependents. Dependents rewritten before the
+failure are committed and resume on their own.
+
+A republishing dependent whose `package.json` already names the new version
+fails here too: it changed after the plan read it, and skipping its rewrite
+would drop its auto-changeset.
+
 ## Unexpected Behavior
 
 ### "Auto-changeset generated when I didn't expect it"
@@ -308,6 +328,9 @@ Resumption is **automatic** and **natural**:
    - It re-plans from the current working tree
    - Already-published packages have no changesets → drop out of the new plan
    - Failed packages still have changesets → retried automatically
+   - A published package's dependents left unrewritten (a `drift`, `network`,
+     or `dependency_update` failure) aren't rewritten by the re-run: update
+     them first, as each of those sections says
    - Repos left ahead of origin by the run's own commits pass the gate (see
      [Readiness](publishing.md#readiness))
 4. No state files needed, just re-run the same command!
@@ -342,8 +365,11 @@ gro gitops_publish --wetrun --format json --outfile result.json
 `result.json`'s `events` list each package's outcome in order. A failure is a
 `package_failed` event whose `code` says why — one of `drift` (the version
 `changeset version` wrote isn't the plan's; its `error` names both),
-`not_ready`, `network` (the npm wait), or `publish` (its `error` ends with the
-end of `gro publish`'s stderr). `failed[]` names each failed package with its
+`not_ready`, `network` (the npm wait), `publish` (its `error` ends with the
+end of `gro publish`'s stderr), or `dependency_update` (a dependent's
+`package.json` rewrite; the event names the dependent — see
+["Failed to update …'s dependencies"](#failed-to-update-s-dependencies-)).
+`failed[]` names each failed package with its
 `error` message as a string; when the executor itself threw (a plan with
 errors, a failed preflight) it holds one entry named `FATAL_ERROR` carrying
 the thrown message. A readiness refusal or a blocked plan throws before any

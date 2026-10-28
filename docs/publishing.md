@@ -67,8 +67,8 @@ Packages can publish in four distinct scenarios:
 - Package has NO `.changeset/*.md` files
 - Package has NO production/peer dependency updates
 - Behavior: Skipped (not published)
-- Reported as: "No changes", the plan's `no_changes` package list (not a
-  warning)
+- Reported as: "Nothing to publish", the plan's `no_changes` package list
+  (not a warning) — a package there may still take dependency-only updates
 - This is normal: Only packages with changes should publish
 
 A package with changeset files that yield no bump for it — none parses, or
@@ -85,7 +85,11 @@ When a dependency is updated:
 - **Dev deps**: Package.json updated, NO republish (dev-only changes)
 
 When a package appears in both production/peer and dev dependencies,
-production/peer takes priority for dependency graph calculations.
+production/peer takes priority for dependency graph calculations. The rewrite
+after a publish moves every section that names the dependency, each keeping
+its own prefix (`>=0.79.0` beside `^0.79.0`), in one commit, so the
+dev-dependency pass skips that dev entry. The plan's diffs show the ranges as
+they'll be written.
 
 ## Plan vs Dry Run
 

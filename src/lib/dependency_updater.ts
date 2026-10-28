@@ -7,11 +7,9 @@ import {
 	create_changeset_for_dependency_updates,
 	create_dependency_updates
 } from './changeset_generator.ts';
-import { needs_update, get_update_prefix } from './version_utils.ts';
+import { to_updated_range, type VersionStrategy } from './version_utils.ts';
 import type { GitOperations, FsOperations } from './operations.ts';
 import { default_git_operations, default_fs_operations } from './operations_defaults.ts';
-
-export type VersionStrategy = 'exact' | 'caret' | 'tilde' | 'gte';
 
 export interface UpdatePackageJsonOptions {
 	strategy?: VersionStrategy;
@@ -21,19 +19,25 @@ export interface UpdatePackageJsonOptions {
 	fs_ops?: FsOperations;
 }
 
+const DEPENDENCY_SECTIONS = ['dependencies', 'devDependencies', 'peerDependencies'] as const;
+
 /**
  * Updates `package.json` dependencies and creates changeset if needed.
  *
  * Workflow:
- * 1. Updates all dependency types (dependencies, devDependencies, peerDependencies)
+ * 1. Rewrites each updated name in every section that lists it (dependencies,
+ *    devDependencies, peerDependencies), so a package that is both a peer and a
+ *    dev dependency moves in one commit
  * 2. Writes updated `package.json` with tabs formatting
  * 3. Creates auto-changeset if `published_versions` provided (for transitive updates)
  * 4. Commits both `package.json` and changeset with standard message
  *
- * Uses version strategy to determine prefix (exact, caret, tilde, gte) while preserving
- * existing prefixes when possible.
+ * Each range keeps its existing prefix, else takes the strategy's (`to_updated_range`).
+ * When no entry's value changes — every range already names its version — it writes,
+ * creates, and commits nothing, or throws when `published_versions` is given.
  *
- * @throws {Error} if file operations or git operations fail
+ * @throws {Error} if file operations or git operations fail, or if nothing changes for a
+ *   republishing dependent (`published_versions` given), whose changeset would go missing
  */
 export const update_package_json = async (
 	repo: LocalRepo,
@@ -58,49 +62,30 @@ export const update_package_json = async (
 	}
 	const package_json = JSON.parse(content_result.value);
 
-	// Apply version strategy
-	const prefix =
-		strategy === 'exact' ? '' : strategy === 'caret' ? '^' : strategy === 'gte' ? '>=' : '~';
-
 	let updated = false;
-
-	// Update dependencies
-	if (package_json.dependencies) {
+	for (const section of DEPENDENCY_SECTIONS) {
+		const deps: Record<string, string> | undefined = package_json[section];
+		if (!deps) continue;
 		for (const [name, version] of updates) {
-			if (name in package_json.dependencies) {
-				const current = package_json.dependencies[name];
-				const update_prefix = get_update_prefix(current, prefix);
-				package_json.dependencies[name] = update_prefix + version;
-				updated = true;
-			}
+			if (!(name in deps)) continue;
+			const next = to_updated_range(deps[name]!, version, strategy);
+			if (next === deps[name]) continue;
+			deps[name] = next;
+			updated = true;
 		}
 	}
 
-	// Update devDependencies
-	if (package_json.devDependencies) {
-		for (const [name, version] of updates) {
-			if (name in package_json.devDependencies) {
-				const current = package_json.devDependencies[name];
-				const update_prefix = get_update_prefix(current, prefix);
-				package_json.devDependencies[name] = update_prefix + version;
-				updated = true;
-			}
+	if (!updated) {
+		// a republishing dependent always has a range to move: the plan read this file and saw
+		// it behind, so an unchanged one means it changed since — fail rather than skip its changeset
+		if (published_versions) {
+			throw new Error(
+				`${repo.library.name}'s package.json already names every updated version, so it ` +
+					`would republish without its auto-changeset — it changed since the plan read it`
+			);
 		}
+		return;
 	}
-
-	// Update peerDependencies
-	if (package_json.peerDependencies) {
-		for (const [name, version] of updates) {
-			if (name in package_json.peerDependencies) {
-				const current = package_json.peerDependencies[name];
-				const update_prefix = get_update_prefix(current, prefix);
-				package_json.peerDependencies[name] = update_prefix + version;
-				updated = true;
-			}
-		}
-	}
-
-	if (!updated) return;
 
 	// Write updated package.json
 	const write_result = await fs_ops.writeFile({
@@ -119,22 +104,9 @@ export const update_package_json = async (
 		const all_deps: Map<string, string> = new Map();
 
 		// Collect all current dependencies with their versions
-		if (repo.dependencies) {
-			for (const [name, version] of repo.dependencies) {
-				if (updates.has(name)) {
-					all_deps.set(name, version);
-				}
-			}
-		}
-		if (repo.dev_dependencies) {
-			for (const [name, version] of repo.dev_dependencies) {
-				if (updates.has(name)) {
-					all_deps.set(name, version);
-				}
-			}
-		}
-		if (repo.peer_dependencies) {
-			for (const [name, version] of repo.peer_dependencies) {
+		for (const deps of [repo.dependencies, repo.dev_dependencies, repo.peer_dependencies]) {
+			if (!deps) continue;
+			for (const [name, version] of deps) {
 				if (updates.has(name)) {
 					all_deps.set(name, version);
 				}
@@ -175,129 +147,4 @@ export const update_package_json = async (
 	if (!commit_result.ok) {
 		throw new Error(`Failed to commit: ${commit_result.message}`);
 	}
-};
-
-export interface UpdateAllReposOptions {
-	strategy?: VersionStrategy;
-	log?: Logger;
-	git_ops?: GitOperations;
-	fs_ops?: FsOperations;
-}
-
-export const update_all_repos = async (
-	repos: Array<LocalRepo>,
-	published: Map<string, string>,
-	options: UpdateAllReposOptions = {}
-): Promise<{ updated: number; failed: Array<{ repo: string; error: Error }> }> => {
-	const {
-		strategy = 'caret',
-		log,
-		git_ops = default_git_operations,
-		fs_ops = default_fs_operations
-	} = options;
-	let updated_count = 0;
-	const failed: Array<{ repo: string; error: Error }> = [];
-
-	for (const repo of repos) {
-		const updates: Map<string, string> = new Map();
-
-		// Find dependencies that were published
-		if (repo.dependencies) {
-			for (const [dep_name] of repo.dependencies) {
-				const new_version = published.get(dep_name);
-				if (new_version) {
-					updates.set(dep_name, new_version);
-				}
-			}
-		}
-
-		if (repo.dev_dependencies) {
-			for (const [dep_name] of repo.dev_dependencies) {
-				const new_version = published.get(dep_name);
-				if (new_version) {
-					updates.set(dep_name, new_version);
-				}
-			}
-		}
-
-		if (repo.peer_dependencies) {
-			for (const [dep_name] of repo.peer_dependencies) {
-				const new_version = published.get(dep_name);
-				if (new_version) {
-					updates.set(dep_name, new_version);
-				}
-			}
-		}
-
-		if (updates.size === 0) continue;
-
-		try {
-			await update_package_json(repo, updates, { strategy, log, git_ops, fs_ops });
-			updated_count++;
-			log?.info(`    Updated ${updates.size} dependencies in ${repo.library.name}`);
-		} catch (error) {
-			const err = error instanceof Error ? error : new Error(String(error));
-			failed.push({ repo: repo.library.name, error: err });
-			log?.error(`    Failed to update ${repo.library.name}: ${err.message}`);
-		}
-	}
-
-	return { updated: updated_count, failed };
-};
-
-export const find_updates_needed = (
-	repo: LocalRepo,
-	published: Map<string, string>
-): Map<
-	string,
-	{ current: string; new: string; type: 'dependencies' | 'devDependencies' | 'peerDependencies' }
-> => {
-	const updates: Map<
-		string,
-		{ current: string; new: string; type: 'dependencies' | 'devDependencies' | 'peerDependencies' }
-	> = new Map();
-
-	// Check dependencies
-	if (repo.dependencies) {
-		for (const [dep_name, current_version] of repo.dependencies) {
-			const new_version = published.get(dep_name);
-			if (new_version && needs_update(current_version, new_version)) {
-				updates.set(dep_name, {
-					current: current_version,
-					new: new_version,
-					type: 'dependencies'
-				});
-			}
-		}
-	}
-
-	// Check devDependencies
-	if (repo.dev_dependencies) {
-		for (const [dep_name, current_version] of repo.dev_dependencies) {
-			const new_version = published.get(dep_name);
-			if (new_version && needs_update(current_version, new_version)) {
-				updates.set(dep_name, {
-					current: current_version,
-					new: new_version,
-					type: 'devDependencies'
-				});
-			}
-		}
-	}
-
-	// Check peerDependencies
-	if (repo.peer_dependencies) {
-		for (const [dep_name, current_version] of repo.peer_dependencies) {
-			const new_version = published.get(dep_name);
-			if (new_version && needs_update(current_version, new_version)) {
-				updates.set(dep_name, {
-					current: current_version,
-					new: new_version,
-					type: 'peerDependencies'
-				});
-			}
-		}
-	}
-
-	return updates;
 };

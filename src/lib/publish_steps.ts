@@ -10,6 +10,7 @@
 
 import type { BumpType } from './version_utils.ts';
 import {
+	dev_update_rides_along,
 	version_change_kind,
 	type PublishingPlan,
 	type VersionChange,
@@ -103,8 +104,10 @@ export const derive_publish_steps = (
 	// Phase 2: dev-dependency updates for deps that published this run — committed without a
 	// changeset (dev-only changes redeploy, they don't republish). No install step: these repos
 	// don't run `gro publish`; gro installs + heals their deps when they next build/deploy/sync.
+	// A dev entry beside a prod/peer one of the same dependency moved with it in phase 1.
 	for (const update of plan.dependency_updates) {
 		if (update.type !== 'devDependencies') continue;
+		if (dev_update_rides_along(update, plan.dependency_updates)) continue;
 		const dep_change = changes.get(update.updated_dependency);
 		if (!dep_change) continue;
 		steps.push({

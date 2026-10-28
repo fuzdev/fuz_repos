@@ -17,7 +17,12 @@ import {
 	version_change_kind,
 	type PublishingPlan
 } from './publishing_plan.ts';
-import { log_publishing_plan, type LogPlanOptions } from './publishing_plan_logging.ts';
+import {
+	log_publishing_plan,
+	to_dependency_type_label,
+	type LogPlanOptions
+} from './publishing_plan_logging.ts';
+import { to_updated_range } from './version_utils.ts';
 import {
 	format_and_output,
 	output_is_machine,
@@ -271,16 +276,12 @@ const format_plan_as_markdown = (plan: PublishingPlan): Array<string> => {
 			lines.push('');
 			lines.push('```diff');
 			for (const update of updates) {
-				const type_label =
-					update.type === 'dependencies'
-						? 'prod'
-						: update.type === 'peerDependencies'
-							? 'peer'
-							: 'dev';
+				const type_label = to_dependency_type_label(update.type);
+				const next = to_updated_range(update.current_version, update.new_version);
 				lines.push(
 					`- "${update.updated_dependency}": "${update.current_version}"  # ${type_label}`
 				);
-				lines.push(`+ "${update.updated_dependency}": "${update.new_version}"  # ${type_label}`);
+				lines.push(`+ "${update.updated_dependency}": "${next}"  # ${type_label}`);
 			}
 			lines.push('```');
 			lines.push('');

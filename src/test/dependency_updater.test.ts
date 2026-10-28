@@ -1,11 +1,7 @@
 import { assert, describe, test } from 'vitest';
 import { join } from 'node:path';
 
-import {
-	update_package_json,
-	update_all_repos,
-	find_updates_needed
-} from '#lib/dependency_updater.ts';
+import { update_package_json } from '#lib/dependency_updater.ts';
 import { create_mock_repo, create_mock_git_ops, create_mock_fs_ops } from './test_helpers.ts';
 import type { GitOperations } from '#lib/operations.ts';
 import type { PublishedVersion } from '#lib/multi_repo_publisher.ts';
@@ -504,193 +500,101 @@ describe('dependency_updater', () => {
 
 			assert.strictEqual(git_ops.commits.length, 0);
 		});
-	});
 
-	describe('find_updates_needed', () => {
-		test('identifies dependencies that need updating', () => {
+		test('rewrites a peer and dev entry of one dependency in one commit', async () => {
+			const fs = create_mock_fs_ops();
 			const repo = create_mock_repo({
 				name: 'test-pkg',
-				deps: {
-					'dep-a': '^1.0.0',
-					'dep-b': '^2.0.0'
-				}
+				peer_deps: { lib: '>=1.0.0' },
+				dev_deps: { lib: '^1.0.0' }
 			});
+			const package_json_path = join(repo.repo_dir, 'package.json');
+			fs.set(
+				package_json_path,
+				JSON.stringify({
+					name: 'test-pkg',
+					version: '1.0.0',
+					peerDependencies: { lib: '>=1.0.0' },
+					devDependencies: { lib: '^1.0.0' }
+				})
+			);
+			const git_ops = create_trackable_git_ops();
 
-			const published = new Map([
-				['dep-a', '1.1.0'],
-				['dep-b', '2.0.0'] // same version
+			await update_package_json(repo, new Map([['lib', '1.1.0']]), { git_ops, fs_ops: fs });
+
+			const parsed = JSON.parse(fs.get(package_json_path)!);
+			assert.strictEqual(parsed.peerDependencies.lib, '>=1.1.0');
+			assert.strictEqual(parsed.devDependencies.lib, '^1.1.0');
+			assert.strictEqual(git_ops.commits.length, 1);
+		});
+
+		// the dev-dependency pass after a peer rewrite already moved the dev entry:
+		// committing an unchanged package.json would fail with "nothing to commit"
+		test('writes and commits nothing when every range already names the version', async () => {
+			const fs = create_mock_fs_ops();
+			const repo = create_mock_repo({
+				name: 'test-pkg',
+				peer_deps: { lib: '>=1.0.0' },
+				dev_deps: { lib: '^1.0.0' }
+			});
+			const package_json_path = join(repo.repo_dir, 'package.json');
+			const content = JSON.stringify({
+				name: 'test-pkg',
+				version: '1.0.0',
+				peerDependencies: { lib: '>=1.1.0' },
+				devDependencies: { lib: '^1.1.0' }
+			});
+			fs.set(package_json_path, content);
+			const git_ops = create_trackable_git_ops();
+
+			await update_package_json(repo, new Map([['lib', '1.1.0']]), { git_ops, fs_ops: fs });
+
+			assert.strictEqual(fs.get(package_json_path), content);
+			assert.strictEqual(git_ops.added_files.length, 0);
+			assert.strictEqual(git_ops.commits.length, 0);
+		});
+
+		test('throws for a republishing dependent with nothing to rewrite', async () => {
+			const fs = create_mock_fs_ops();
+			const repo = create_mock_repo({ name: 'test-pkg', deps: { lib: '^1.0.0' } });
+			const package_json_path = join(repo.repo_dir, 'package.json');
+			const content = JSON.stringify({
+				name: 'test-pkg',
+				version: '1.0.0',
+				dependencies: { lib: '^1.1.0' }
+			});
+			fs.set(package_json_path, content);
+			const git_ops = create_trackable_git_ops();
+			const published_versions: Map<string, PublishedVersion> = new Map([
+				[
+					'lib',
+					{
+						name: 'lib',
+						old_version: '1.0.0',
+						new_version: '1.1.0',
+						bump_type: 'minor',
+						breaking: false,
+						commit: 'abc',
+						tag: 'v1.1.0'
+					}
+				]
 			]);
 
-			const updates = find_updates_needed(repo, published);
-
-			assert.strictEqual(updates.size, 1);
-			assert.deepEqual(updates.get('dep-a'), {
-				current: '^1.0.0',
-				new: '1.1.0',
-				type: 'dependencies'
-			});
-		});
-
-		test('identifies devDependencies needing updates', () => {
-			const repo = create_mock_repo({
-				name: 'test-pkg',
-				dev_deps: {
-					'dev-a': '^3.0.0'
-				}
-			});
-
-			const published = new Map([['dev-a', '3.5.0']]);
-
-			const updates = find_updates_needed(repo, published);
-
-			assert.strictEqual(updates.size, 1);
-			assert.deepEqual(updates.get('dev-a'), {
-				current: '^3.0.0',
-				new: '3.5.0',
-				type: 'devDependencies'
-			});
-		});
-
-		test('identifies peerDependencies needing updates', () => {
-			const repo = create_mock_repo({
-				name: 'test-pkg',
-				peer_deps: {
-					'peer-a': '^4.0.0'
-				}
-			});
-
-			const published = new Map([['peer-a', '4.1.0']]);
-
-			const updates = find_updates_needed(repo, published);
-
-			assert.strictEqual(updates.size, 1);
-			assert.deepEqual(updates.get('peer-a'), {
-				current: '^4.0.0',
-				new: '4.1.0',
-				type: 'peerDependencies'
-			});
-		});
-
-		test('returns empty map when no updates needed', () => {
-			const repo = create_mock_repo({
-				name: 'test-pkg',
-				deps: {
-					'dep-a': '^1.0.0'
-				}
-			});
-
-			const published = new Map([['dep-a', '1.0.0']]);
-
-			const updates = find_updates_needed(repo, published);
-
-			assert.strictEqual(updates.size, 0);
-		});
-
-		test('handles multiple dependency types together', () => {
-			const repo = create_mock_repo({
-				name: 'test-pkg',
-				deps: { 'dep-a': '^1.0.0' },
-				dev_deps: { 'dev-a': '^2.0.0' },
-				peer_deps: { 'peer-a': '^3.0.0' }
-			});
-
-			const published = new Map([
-				['dep-a', '1.1.0'],
-				['dev-a', '2.2.0'],
-				['peer-a', '3.3.0']
-			]);
-
-			const updates = find_updates_needed(repo, published);
-
-			assert.strictEqual(updates.size, 3);
-			assert.strictEqual(updates.get('dep-a')?.type, 'dependencies');
-			assert.strictEqual(updates.get('dev-a')?.type, 'devDependencies');
-			assert.strictEqual(updates.get('peer-a')?.type, 'peerDependencies');
-		});
-	});
-
-	describe('update_all_repos', () => {
-		test('updates all repos with matching dependencies', async () => {
-			const fs = create_mock_fs_ops();
-
-			const repos = [
-				create_mock_repo({ name: 'pkg-a', deps: { lib: '^1.0.0' } }),
-				create_mock_repo({ name: 'pkg-b', deps: { lib: '^1.0.0' } })
-			];
-
-			for (const repo of repos) {
-				const path = join(repo.repo_dir, 'package.json');
-				fs.set(
-					path,
-					JSON.stringify(
-						{
-							name: repo.library.name,
-							version: '1.0.0',
-							dependencies: { lib: '^1.0.0' }
-						},
-						null,
-						'\t'
-					)
-				);
+			let error: unknown;
+			try {
+				await update_package_json(repo, new Map([['lib', '1.1.0']]), {
+					published_versions,
+					git_ops,
+					fs_ops: fs
+				});
+			} catch (e) {
+				error = e;
 			}
 
-			const published = new Map([['lib', '1.5.0']]);
-			const git_ops = create_trackable_git_ops();
-
-			const result = await update_all_repos(repos, published, { git_ops, fs_ops: fs });
-
-			assert.strictEqual(result.updated, 2);
-			assert.strictEqual(result.failed.length, 0);
-		});
-
-		test('skips repos without matching dependencies', async () => {
-			const fs = create_mock_fs_ops();
-
-			const repos = [
-				create_mock_repo({ name: 'pkg-a', deps: { lib: '^1.0.0' } }),
-				create_mock_repo({ name: 'pkg-b', deps: { other: '^2.0.0' } })
-			];
-
-			for (const repo of repos) {
-				const path = join(repo.repo_dir, 'package.json');
-				fs.set(
-					path,
-					JSON.stringify(
-						{
-							name: repo.library.name,
-							version: '1.0.0',
-							dependencies: repo.package_json.dependencies
-						},
-						null,
-						'\t'
-					)
-				);
-			}
-
-			const published = new Map([['lib', '1.5.0']]);
-			const git_ops = create_trackable_git_ops();
-
-			const result = await update_all_repos(repos, published, { git_ops, fs_ops: fs });
-
-			assert.strictEqual(result.updated, 1); // only pkg-a
-		});
-
-		test('reports failures for problematic repos', async () => {
-			const fs = create_mock_fs_ops();
-
-			const repos = [create_mock_repo({ name: 'pkg-a', deps: { lib: '^1.0.0' } })];
-
-			// Don't set up the file - will cause read error
-
-			const published = new Map([['lib', '1.5.0']]);
-			const git_ops = create_trackable_git_ops();
-
-			const result = await update_all_repos(repos, published, { git_ops, fs_ops: fs });
-
-			assert.strictEqual(result.updated, 0);
-			assert.strictEqual(result.failed.length, 1);
-			assert.strictEqual(result.failed[0]!.repo, 'pkg-a');
-			assert.instanceOf(result.failed[0]!.error, Error);
+			assert(error instanceof Error);
+			assert.include(error.message, 'changed since the plan read it');
+			assert.strictEqual(fs.get(package_json_path), content);
+			assert.strictEqual(git_ops.commits.length, 0);
 		});
 	});
 });

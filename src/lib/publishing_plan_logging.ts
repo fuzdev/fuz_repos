@@ -17,12 +17,18 @@ import {
 	type VerboseData,
 	type VerboseChangesetDetail,
 	type VerboseIteration,
-	type VerbosePropagationChain,
+	type VerbosePropagation,
 	type VerboseGraphSummary
 } from './publishing_plan.ts';
+import { to_updated_range, type VersionStrategy } from './version_utils.ts';
 
 export interface LogPlanOptions {
 	verbose?: boolean;
+	/**
+	 * The prefix strategy the executor rewrites unprefixed ranges with, so the diffs show
+	 * what it writes. `gitops_plan` and `gitops_validate` take no strategy and show the default.
+	 */
+	version_strategy?: VersionStrategy;
 }
 
 const SEPARATOR = '────────────────────────────────────────';
@@ -36,33 +42,39 @@ const log_section_header = (title: string, log: Logger): void => {
 	log.info(st('dim', SEPARATOR));
 };
 
-/**
- * Formats a dependency update as diff-style output.
- * Shows - old / + new for the dependency version.
- */
-const format_dep_diff = (dep_name: string, current: string, next: string): Array<string> => {
-	return [
-		st('red', `    - "${dep_name}": "${current}"`),
-		st('green', `    + "${dep_name}": "${next}"`)
-	];
-};
+/** The short label of a dependency section: `prod`, `peer`, or `dev`. */
+export const to_dependency_type_label = (
+	type: DependencyUpdate['type']
+): 'prod' | 'peer' | 'dev' =>
+	type === 'dependencies' ? 'prod' : type === 'peerDependencies' ? 'peer' : 'dev';
 
 /**
- * Gets dependency updates for a specific package, grouped by dependency name.
+ * Formats a package's dependency updates as diff-style lines, one `-`/`+` pair
+ * per entry, each section labeled. The `+` side is the range the executor
+ * writes (`to_updated_range`), its prefix kept.
+ *
+ * @param style - `color` for a publishing package, `dim` for one that doesn't republish
  */
-const get_updates_for_package = (
+const format_dependency_diffs = (
 	pkg_name: string,
-	dependency_updates: Array<DependencyUpdate>
-): Map<string, Array<DependencyUpdate>> => {
-	const updates: Map<string, Array<DependencyUpdate>> = new Map();
+	dependency_updates: Array<DependencyUpdate>,
+	strategy: VersionStrategy | undefined,
+	style: 'color' | 'dim'
+): Array<string> => {
+	const lines: Array<string> = [];
 	for (const update of dependency_updates) {
-		if (update.dependent_package === pkg_name) {
-			const dep_updates = updates.get(update.updated_dependency) || [];
-			dep_updates.push(update);
-			updates.set(update.updated_dependency, dep_updates);
-		}
+		if (update.dependent_package !== pkg_name) continue;
+		const name = update.updated_dependency;
+		const next = to_updated_range(update.current_version, update.new_version, strategy);
+		const label = st('dim', `  # ${to_dependency_type_label(update.type)}`);
+		const removed = `    - "${name}": "${update.current_version}"`;
+		const added = `    + "${name}": "${next}"`;
+		lines.push(
+			(style === 'color' ? st('red', removed) : st('dim', removed)) + label,
+			(style === 'color' ? st('green', added) : st('dim', added)) + label
+		);
 	}
-	return updates;
+	return lines;
 };
 
 /**
@@ -74,6 +86,7 @@ const log_version_change_with_diffs = (
 	total: number,
 	dependency_updates: Array<DependencyUpdate>,
 	breaking_cascades: Map<string, Array<string>>,
+	strategy: VersionStrategy | undefined,
 	log: Logger
 ): void => {
 	const breaking_indicator = change.breaking ? st('red', ' BREAKING') : '';
@@ -120,15 +133,13 @@ const log_version_change_with_diffs = (
 	}
 
 	// Show dependency diffs for this package
-	const pkg_updates = get_updates_for_package(change.package_name, dependency_updates);
-	if (pkg_updates.size > 0) {
-		for (const [dep_name, updates] of pkg_updates) {
-			if (updates.length === 0) continue;
-			const update = updates[0]!;
-			for (const line of format_dep_diff(dep_name, update.current_version, update.new_version)) {
-				log.info(line);
-			}
-		}
+	for (const line of format_dependency_diffs(
+		change.package_name,
+		dependency_updates,
+		strategy,
+		'color'
+	)) {
+		log.info(line);
 	}
 };
 
@@ -205,6 +216,7 @@ export const log_publishing_plan = (
 					total,
 					dependency_updates,
 					breaking_cascades,
+					options.version_strategy,
 					log
 				);
 			}
@@ -234,13 +246,13 @@ export const log_publishing_plan = (
 		log.info(st('dim', 'Dependency Updates (no republish):'));
 		for (const pkg of dep_only_packages) {
 			log.info(st('dim', `  ${pkg}:`));
-			const pkg_updates = get_updates_for_package(pkg, dependency_updates);
-			for (const [dep_name, updates] of pkg_updates) {
-				if (updates.length === 0) continue;
-				const update = updates[0]!;
-				// Use dim styling for non-publishing packages
-				log.info(st('dim', `    - "${dep_name}": "${update.current_version}"`));
-				log.info(st('dim', `    + "${dep_name}": "${update.new_version}"`));
+			for (const line of format_dependency_diffs(
+				pkg,
+				dependency_updates,
+				options.version_strategy,
+				'dim'
+			)) {
+				log.info(line);
 			}
 		}
 		log.info('');
@@ -255,12 +267,13 @@ export const log_publishing_plan = (
 		log.info('');
 	}
 
-	// Info sentences, then the packages with nothing to publish
+	// Info sentences, then the packages with nothing to publish (some may still take
+	// dependency-only updates above)
 	for (const line of info) {
 		log.info(st('dim', line));
 	}
 	if (no_changes.length > 0) {
-		log.info(st('dim', `No changes: ${no_changes.join(', ')}`));
+		log.info(st('dim', `Nothing to publish: ${no_changes.join(', ')}`));
 	}
 	if (info.length > 0 || no_changes.length > 0) {
 		log.info('');
@@ -303,7 +316,7 @@ const log_verbose = (data: VerboseData, log: Logger): void => {
 
 	log_verbose_changeset_details(data.changeset_details, log);
 	log_verbose_iteration_details(data.iterations, data.total_iterations, log);
-	log_verbose_propagation_chains(data.propagation_chains, log);
+	log_verbose_propagations(data.propagations, log);
 	log_verbose_graph_summary(data.graph_summary, log);
 };
 
@@ -321,7 +334,11 @@ const log_verbose_changeset_details = (
 	for (const pkg of details) {
 		log.info(st('dim', `${pkg.package_name}:`));
 		for (const file of pkg.files) {
-			const summary_text = file.summary ? `: "${file.summary}"` : '';
+			// the first line alone: a changeset body can run to paragraphs
+			const summary = file.summary.trim();
+			const first_line = summary.split('\n', 1)[0]!.trim();
+			const more = summary.includes('\n') ? ' …' : '';
+			const summary_text = first_line ? `: "${first_line}"${more}` : '';
 			log.info(st('dim', `  .changeset/${file.filename} (${file.bump_type})${summary_text}`));
 		}
 	}
@@ -394,26 +411,22 @@ const log_verbose_iteration_details = (
 };
 
 /**
- * Logs breaking change propagation chains as tree structure.
+ * Logs each breaking package with the direct prod/peer dependents its publish
+ * rewrites, one branch per dependent. Transitive spread shows as later sources,
+ * since a dependent that republishes breaking is a source of its own.
  */
-const log_verbose_propagation_chains = (
-	chains: Array<VerbosePropagationChain>,
-	log: Logger
-): void => {
-	if (chains.length === 0) return;
+const log_verbose_propagations = (propagations: Array<VerbosePropagation>, log: Logger): void => {
+	if (propagations.length === 0) return;
 
 	log_section_header('Breaking Change Propagation', log);
 
-	for (const chain of chains) {
-		log.info(st('dim', `${chain.source} (source)`));
+	for (const { source, dependents } of propagations) {
+		log.info(st('dim', `${source} (source)`));
 
-		for (let i = 0; i < chain.chain.length; i++) {
-			const item = chain.chain[i]!;
-			const indent = '   '.repeat(i);
-			const connector = '└─';
-			log.info(
-				st('dim', `${indent}${connector} ${item.pkg} (${item.dep_type} dep) → ${item.action}`)
-			);
+		for (let i = 0; i < dependents.length; i++) {
+			const item = dependents[i]!;
+			const connector = i === dependents.length - 1 ? '└─' : '├─';
+			log.info(st('dim', `${connector} ${item.pkg} (${item.dep_type} dep) → ${item.action}`));
 		}
 	}
 	log.info('');

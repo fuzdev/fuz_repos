@@ -215,7 +215,7 @@ export const run_gitops_publish = async (
 	// so the operator sees the errors that blocked it.
 	if (gate.action !== 'proceed') {
 		log.info(st('cyan', 'Publishing Plan'));
-		log_publishing_plan(publishing_plan, log, { verbose });
+		log_publishing_plan(publishing_plan, log, { verbose, version_strategy: peer_strategy });
 	}
 
 	if (gate.action === 'blocked') {

@@ -4,8 +4,10 @@ import { join } from 'node:path';
 import { styleText as st } from 'node:util';
 
 import { repo_is_npm, type LocalRepo } from './local_repo.ts';
-import { update_package_json, type VersionStrategy } from './dependency_updater.ts';
+import { update_package_json } from './dependency_updater.ts';
+import type { VersionStrategy } from './version_utils.ts';
 import {
+	dev_update_rides_along,
 	generate_publishing_plan,
 	type VersionChange,
 	type DependencyUpdate,
@@ -307,19 +309,36 @@ export const execute_publishing_plan = async (
 							creates_changeset: republishes
 						});
 					}
+					try {
+						await update_package_json(dependent_repo, updates, {
+							strategy: version_strategy,
+							// `published_versions` creates the auto-changeset; an update-only leaf gets
+							// its ranges rewritten and committed with no changeset (it won't republish)
+							published_versions: republishes ? published : undefined,
+							log,
+							git_ops: ops.git,
+							fs_ops: ops.fs
+						});
+					} catch (error) {
+						throw new DependentUpdateError(dependent_name, error);
+					}
 					changed_repos.add(dependent_name); // Mark as changed for deployment
-					await update_package_json(dependent_repo, updates, {
-						strategy: version_strategy,
-						// `published_versions` creates the auto-changeset; an update-only leaf gets
-						// its ranges rewritten and committed with no changeset (it won't republish)
-						published_versions: republishes ? published : undefined,
-						log,
-						git_ops: ops.git,
-						fs_ops: ops.fs
-					});
 				}
 			}
 		} catch (error) {
+			// A dependent's rewrite failing comes after this package published: the failure is
+			// the dependent's, and this package stays published.
+			if (error instanceof DependentUpdateError) {
+				failed.set(error.dependent, error);
+				emit({
+					event: 'package_failed',
+					name: error.dependent,
+					error: error.message,
+					code: 'dependency_update'
+				});
+				log?.error(st('red', `  ❌ ${error.message}`));
+				break; // fail fast: the dependent's republish would read a half-rewritten package.json
+			}
 			const err = error instanceof Error ? error : new Error(String(error));
 			failed.set(pkg_name, err);
 			emit({
@@ -343,11 +362,14 @@ export const execute_publishing_plan = async (
 	// Only package.json is rewritten + committed here — no install. These repos don't run
 	// `gro publish`; their `node_modules` is refreshed (and ETARGET-healed) by gro the next
 	// time they build/deploy/sync, so the executor never runs a bare `npm install` itself.
+	// A dev entry beside a prod/peer one of the same dependency moved with it in phase 1.
 	if (published.size > 0 && wetrun) {
 		const dev_updates_by_repo = group_dependency_updates(
 			plan.dependency_updates,
 			published,
-			(update) => update.type === 'devDependencies'
+			(update) =>
+				update.type === 'devDependencies' &&
+				!dev_update_rides_along(update, plan.dependency_updates)
 		);
 
 		if (dev_updates_by_repo.size > 0) {
@@ -357,6 +379,9 @@ export const execute_publishing_plan = async (
 		for (const [repo_name, dev_updates] of dev_updates_by_repo) {
 			const repo = repo_by_name.get(repo_name);
 			if (!repo) continue;
+			// a repo that failed this run (its publish or its rewrite) may hold a half-written
+			// package.json and a staged changeset — committing a dev bump over it would land them unpaired
+			if (failed.has(repo_name)) continue;
 
 			log?.info(`  Updating ${dev_updates.size} dev dependencies in ${repo_name}`);
 			for (const [dep_name, dep_version] of dev_updates) {
@@ -369,16 +394,30 @@ export const execute_publishing_plan = async (
 					creates_changeset: false // dev-dep updates redeploy without republishing
 				});
 			}
-			changed_repos.add(repo_name); // Mark as changed for deployment
 			// No `published_versions` here on purpose: a dev-dep bump updates and commits
 			// package.json but must NOT generate a changeset — dev-only changes redeploy
 			// (rebuild) without republishing, so they shouldn't bump the next release.
-			await update_package_json(repo, dev_updates, {
-				strategy: version_strategy,
-				log,
-				git_ops: ops.git,
-				fs_ops: ops.fs
-			});
+			// Every publish is done by now, so a failure here is reported and the pass goes on:
+			// each repo's bump is independent of the others.
+			try {
+				await update_package_json(repo, dev_updates, {
+					strategy: version_strategy,
+					log,
+					git_ops: ops.git,
+					fs_ops: ops.fs
+				});
+				changed_repos.add(repo_name); // Mark as changed for deployment
+			} catch (error) {
+				const err = new DependentUpdateError(repo_name, error);
+				failed.set(repo_name, err);
+				emit({
+					event: 'package_failed',
+					name: repo_name,
+					error: err.message,
+					code: 'dependency_update'
+				});
+				log?.error(st('red', `  ❌ ${err.message}`));
+			}
 		}
 	}
 
@@ -626,6 +665,19 @@ const format_run_failure = (failure: { message: string; stderr_tail?: string }):
 	failure.stderr_tail
 		? `${failure.message}\nthe end of its stderr:\n${redact_secrets(failure.stderr_tail)}`
 		: failure.message;
+
+/**
+ * A failure rewriting a dependent's `package.json` after a publish, carrying the
+ * dependent so the failure is reported as its own, not the published package's.
+ */
+class DependentUpdateError extends Error {
+	readonly dependent: string;
+	constructor(dependent: string, cause: unknown) {
+		const message = cause instanceof Error ? cause.message : String(cause);
+		super(`Failed to update ${dependent}'s dependencies: ${message}`, { cause });
+		this.dependent = dependent;
+	}
+}
 
 /**
  * Groups dependency updates by dependent package — `dependent → (dependency → new

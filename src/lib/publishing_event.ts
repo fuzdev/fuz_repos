@@ -32,7 +32,11 @@ export const PublishingErrorCode = s.one_of([
 	'drift',
 	// the repo wasn't ready when re-checked right before its `gro publish` (origin moved,
 	// a tracked edit, a live session, …) — aborted before any npm side effect
-	'not_ready'
+	'not_ready',
+	// rewriting a dependent's package.json after a publish failed (named by the event,
+	// the dependent, not the package that published) — a prod/peer rewrite stops the
+	// pass, a dev-dependency one is reported and the dev pass goes on
+	'dependency_update'
 ]);
 export type PublishingErrorCode = s.Infer<typeof PublishingErrorCode>;
 

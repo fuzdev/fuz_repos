@@ -1,7 +1,12 @@
 import { assert, test } from 'vitest';
 
 import type { LocalRepo } from '#lib/local_repo.ts';
-import { generate_publishing_plan, version_change_kind } from '#lib/publishing_plan.ts';
+import {
+	dev_update_rides_along,
+	generate_publishing_plan,
+	version_change_kind,
+	type DependencyUpdate
+} from '#lib/publishing_plan.ts';
 import { log_publishing_plan } from '#lib/publishing_plan_logging.ts';
 import { derive_publish_steps } from '#lib/publish_steps.ts';
 import type { ChangesetOperations } from '#lib/operations.ts';
@@ -450,4 +455,30 @@ test('checks each repo for changesets once', async () => {
 
 	assert.strictEqual(plan.version_changes.length, 3);
 	assert.deepEqual([...checked].sort(), ['app', 'core', 'lib']);
+});
+
+test('dev_update_rides_along: a dev entry beside a prod/peer update of the same pair', () => {
+	const update = (
+		dependent_package: string,
+		updated_dependency: string,
+		type: DependencyUpdate['type']
+	): DependencyUpdate => ({
+		dependent_package,
+		updated_dependency,
+		current_version: '^1.0.0',
+		new_version: '1.1.0',
+		type
+	});
+	const peer = update('ui', 'core', 'peerDependencies');
+	const dev = update('ui', 'core', 'devDependencies');
+	const dev_other_dep = update('ui', 'tool', 'devDependencies');
+	const dev_other_dependent = update('site', 'core', 'devDependencies');
+	const updates = [peer, dev, dev_other_dep, dev_other_dependent];
+
+	assert.ok(dev_update_rides_along(dev, updates));
+	assert.ok(!dev_update_rides_along(dev_other_dep, updates));
+	assert.ok(!dev_update_rides_along(dev_other_dependent, updates));
+	// only dev entries ride along
+	assert.ok(!dev_update_rides_along(peer, updates));
+	assert.ok(dev_update_rides_along(dev, [update('ui', 'core', 'dependencies'), dev]));
 });

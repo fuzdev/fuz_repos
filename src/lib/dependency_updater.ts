@@ -26,6 +26,11 @@ export interface UpdatePackageJsonOptions {
 const DEPENDENCY_SECTIONS = ['dependencies', 'devDependencies', 'peerDependencies'] as const;
 
 /**
+ * Reads the indentation of a JSON document's first indented line, defaulting to tabs.
+ */
+const to_json_indent = (content: string): string => /^([ \t]+)\S/m.exec(content)?.[1] ?? '\t';
+
+/**
  * Rewrites one dependent's `package.json` for its dependency updates and commits it,
  * with its auto-changeset when it republishes.
  *
@@ -33,7 +38,8 @@ const DEPENDENCY_SECTIONS = ['dependencies', 'devDependencies', 'peerDependencie
  * 1. Rewrites each updated name in every section that lists it (dependencies,
  *    devDependencies, peerDependencies), so a package that is both a peer and a
  *    dev dependency moves in one commit
- * 2. Writes updated `package.json` with tabs formatting
+ * 2. Writes updated `package.json` in the indentation it was read with, so the
+ *    rewrite moves only the ranges (npm also takes its lockfile's indentation from it)
  * 3. With `changeset`, writes the dependent's one auto-changeset for its prod/peer
  *    updates, merging into it when an earlier rewrite wrote it
  *    (`write_dependency_updates_changeset`)
@@ -105,7 +111,7 @@ export const update_package_json = async (
 	// Write updated package.json
 	const write_result = await fs_ops.writeFile({
 		path: package_json_path,
-		content: JSON.stringify(package_json, null, '\t') + '\n'
+		content: JSON.stringify(package_json, null, to_json_indent(content_result.value)) + '\n'
 	});
 	if (!write_result.ok) {
 		throw new Error(`Failed to write package.json: ${write_result.message}`);

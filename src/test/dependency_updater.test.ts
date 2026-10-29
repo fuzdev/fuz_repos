@@ -424,9 +424,32 @@ describe('dependency_updater', () => {
 			await update_package_json(repo, to_updates(repo, updates), { git_ops, fs_ops: fs });
 
 			const updated = fs.get(package_json_path);
-			// Check it has tabs (JSON.stringify uses tabs)
-			assert.ok(updated!.includes('\t'));
+			assert.ok(updated!.includes('\n\t"name"'));
 			assert.match(updated!, /\n$/); // ends with newline
+		});
+
+		test('preserves JSON formatting with two spaces', async () => {
+			const fs = create_mock_fs_ops();
+			const repo = create_mock_repo({
+				name: 'test-pkg',
+				deps: { 'dep-a': '^1.0.0' }
+			});
+
+			const package_json_path = join(repo.repo_dir, 'package.json');
+			const package_json = {
+				name: 'test-pkg',
+				version: '1.0.0',
+				dependencies: { 'dep-a': '^1.0.0' }
+			};
+			fs.set(package_json_path, JSON.stringify(package_json, null, 2) + '\n');
+
+			const updates = new Map([['dep-a', '1.1.0']]);
+			const git_ops = create_trackable_git_ops();
+
+			await update_package_json(repo, to_updates(repo, updates), { git_ops, fs_ops: fs });
+
+			package_json.dependencies['dep-a'] = '^1.1.0';
+			assert.strictEqual(fs.get(package_json_path), JSON.stringify(package_json, null, 2) + '\n');
 		});
 
 		test('creates git commit with correct message', async () => {

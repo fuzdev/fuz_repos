@@ -184,9 +184,12 @@ clones' lazy fetching — is in docs/repos.md: [status](docs/repos.md#repos-stat
 ### The TS and Rust halves
 
 Every TS entry point is a Gro task (`src/lib/gitops_*.task.ts`), so it runs
-from a Gro project, consumers add one-line re-export shims, and `--config`
-defaults to the CWD's config. `gro gitops_*` stays the supported invocation for
-a project's own config, publishing, and dashboard data.
+from a Gro project, consumers add one-line re-export shims at the same paths,
+and `--config` defaults to the CWD's config. Gro runs a project task only by
+path, so `gro task src/lib/gitops_*.task.ts` (e.g.
+`gro task src/lib/gitops_sync.task.ts`) stays the supported invocation for a
+project's own config, publishing, and dashboard data — a bare
+`gro gitops_sync` names a Gro builtin and fails.
 
 The Rust side lives in this repo as one crate, `crates/fuz_repos` (a library
 plus the `repos` binary), and moves refs under the authoring rule above — git
@@ -311,7 +314,7 @@ left to the user:
   forward (`needs_update`), and whether a move is breaking is measured from the
   range's base version (`to_range_update_bump`), so a lagging range takes the
   bump it skipped.
-- **Step** (`gro gitops_release`) observes — a fetch, each `package.json` and
+- **Step** (`gro task src/lib/gitops_release.task.ts`) observes — a fetch, each `package.json` and
   its changesets, and what the registry shows for each current version
   (`NpmOperations.view_version`) — plans from that, and derives the step
   (`to_release_state`): the dependents of **released** dependencies (nothing
@@ -358,7 +361,7 @@ fuz_repos does not support rollback of published packages:
 
 ### No Concurrent Steps
 
-Running two `gro gitops_release --wetrun` at once is not supported: both
+Running two `gro task src/lib/gitops_release.task.ts --wetrun` at once is not supported: both
 would rewrite the same dependents' `package.json` and changeset files.
 
 ## Configuration
@@ -390,7 +393,7 @@ Requires `SECRET_GITHUB_API_TOKEN` in `.env` for API access.
 
 ## Main operations
 
-### `gro gitops_sync` Task
+### `gro task src/lib/gitops_sync.task.ts` Task
 
 Generates the dashboard's data from each repo as it sits — it never switches
 a branch, pulls, or installs:
@@ -431,18 +434,18 @@ a branch, pulls, or installs:
 
 #### The release loop
 
-- `gro gitops_release` - previews a step: the rewrites it would commit and the
+- `gro task src/lib/gitops_release.task.ts` - previews a step: the rewrites it would commit and the
   wave to publish; writes nothing in git (its fetch refreshes remote-tracking
   refs)
-- `gro gitops_release --wetrun` - the step: commits the rewrites, then names
+- `gro task src/lib/gitops_release.task.ts --wetrun` - the step: commits the rewrites, then names
   the wave to publish
 - `gro publish` in each repo named, inside one npm 2FA window — the user's
-- `gro gitops_release --wetrun --wait` - first waits for the versions awaiting
+- `gro task src/lib/gitops_release.task.ts --wetrun --wait` - first waits for the versions awaiting
   the registry (the wave just published, polling, `--max_wait`, 10 minutes by
   default), then steps
-- `gro gitops_plan` - the whole release offline: its waves, version changes,
+- `gro task src/lib/gitops_plan.task.ts` - the whole release offline: its waves, version changes,
   and rewrites, counting every current version as released
-- `gro gitops_analyze` - the dependency graph, its levels, and its cycles
+- `gro task src/lib/gitops_analyze.task.ts` - the dependency graph, its levels, and its cycles
 - Handles circular dev dependencies by excluding them from the topological sort
 
 **Readiness (holds, never moves)**
@@ -607,32 +610,32 @@ Pages compose a detail component between `PageHeader.svelte` and
 npm i -D @fuzdev/fuz_repos
 
 # Dashboard data (reads each repo as it sits; `repos sync` moves them)
-gro gitops_sync               # fetch, check each repo is ready, then write repos.json + repos.ts from GitHub and library data
-gro gitops_sync --check       # the readiness report alone, from local refs and installed dependencies: no fetch, no token, nothing written; non-zero when a run would refuse
-gro gitops_sync --allow_dirty # read repos off their branch, dirty, or mid-operation as they sit, warning instead of refusing
-gro gitops_sync --outdir <dir> # write the data somewhere other than the routes dir
-gro gitops_sync --registry ../repos.toml # every task takes a registry repos wouldn't find from the cwd
+gro task src/lib/gitops_sync.task.ts               # fetch, check each repo is ready, then write repos.json + repos.ts from GitHub and library data
+gro task src/lib/gitops_sync.task.ts --check       # the readiness report alone, from local refs and installed dependencies: no fetch, no token, nothing written; non-zero when a run would refuse
+gro task src/lib/gitops_sync.task.ts --allow_dirty # read repos off their branch, dirty, or mid-operation as they sit, warning instead of refusing
+gro task src/lib/gitops_sync.task.ts --outdir <dir> # write the data somewhere other than the routes dir
+gro task src/lib/gitops_sync.task.ts --registry ../repos.toml # every task takes a registry repos wouldn't find from the cwd
 
 # Run commands across repos (reads repos as-is, no branch switch/pull; a missing repo fails the run)
-gro gitops_run "npm test"                          # run command in all repos (parallel, concurrency: 5)
-gro gitops_run "npm audit" --concurrency 3         # limit parallelism
-gro gitops_run "gro check" --format json           # JSON on stdout, the log on stderr
-gro gitops_run "gro check" --format json --outfile out.json # clean JSON to a file
+gro task src/lib/gitops_run.task.ts "npm test"                          # run command in all repos (parallel, concurrency: 5)
+gro task src/lib/gitops_run.task.ts "npm audit" --concurrency 3         # limit parallelism
+gro task src/lib/gitops_run.task.ts "gro check" --format json           # JSON on stdout, the log on stderr
+gro task src/lib/gitops_run.task.ts "gro check" --format json --outfile out.json # clean JSON to a file
 
 # Releasing
-gro gitops_validate              # validate configuration (runs analyze, plan, and ci_reconcile)
-gro gitops_analyze               # analyze dependencies: levels, cycles, wildcards
-gro gitops_plan                  # the release offline: waves, version changes, rewrites
-gro gitops_plan --verbose        # show additional details
-gro gitops_release               # preview a step: the rewrites it would commit and the wave to publish
-gro gitops_release --wetrun      # step: commit the rewrites, name the wave to publish
-gro gitops_release --wetrun --wait # first wait for versions awaiting the registry, then step
-gro gitops_release --wetrun --wait --max_wait 1200000 # wait timeout in ms (default 600000, 10 minutes)
-gro gitops_release --range_strategy gte # prefix for a rewritten range that has none: exact, caret (default), tilde, gte; an existing prefix is kept
+gro task src/lib/gitops_validate.task.ts              # validate configuration (runs analyze, plan, and ci_reconcile)
+gro task src/lib/gitops_analyze.task.ts               # analyze dependencies: levels, cycles, wildcards
+gro task src/lib/gitops_plan.task.ts                  # the release offline: waves, version changes, rewrites
+gro task src/lib/gitops_plan.task.ts --verbose        # show additional details
+gro task src/lib/gitops_release.task.ts               # preview a step: the rewrites it would commit and the wave to publish
+gro task src/lib/gitops_release.task.ts --wetrun      # step: commit the rewrites, name the wave to publish
+gro task src/lib/gitops_release.task.ts --wetrun --wait # first wait for versions awaiting the registry, then step
+gro task src/lib/gitops_release.task.ts --wetrun --wait --max_wait 1200000 # wait timeout in ms (default 600000, 10 minutes)
+gro task src/lib/gitops_release.task.ts --range_strategy gte # prefix for a rewritten range that has none: exact, caret (default), tilde, gte; an existing prefix is kept
 
 # Output formats (analyze, plan)
-gro gitops_analyze --format json --outfile analysis.json
-gro gitops_plan --format markdown --outfile plan.md
+gro task src/lib/gitops_analyze.task.ts --format json --outfile analysis.json
+gro task src/lib/gitops_plan.task.ts --format markdown --outfile plan.md
 
 # Development
 gro dev        # start dev server
@@ -859,7 +862,7 @@ the key resolution (`local_repo.resolve.test.ts`).
 
 ## Generated Files & Caches
 
-- **Repo data** — `gro gitops_sync` writes `repos.json` + `repos.ts` to the
+- **Repo data** — `gro task src/lib/gitops_sync.task.ts` writes `repos.json` + `repos.ts` to the
   SvelteKit routes dir (`src/routes/` by default, overridable with `--outdir`).
   These are committed (the site renders from them).
 - **Caches** (gitignored, under `.gro/`) — the fetch-value cache at

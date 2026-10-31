@@ -16,8 +16,9 @@ import { output_is_machine, route_human_output } from './output_helpers.ts';
 
 /** @nodocs */
 export const Args = s.object({
-	// Positional rest args (gro convention) so `gro gitops_run "npm test"` works;
-	// joined with spaces and passed to `sh -c`, so quote commands that contain flags.
+	// Positional rest args (gro convention) so
+	// `gro task src/lib/gitops_run.task.ts "npm test"` works; joined with spaces
+	// and passed to `sh -c`, so quote commands that contain flags.
 	_: s.with_default_fn(
 		meta(s.array(s.string), { description: 'shell command to run in each repo' }),
 		() => []
@@ -129,10 +130,11 @@ export const task: Task<Args> = {
 };
 
 /**
- * Runs `gro gitops_run`: resolves the config's repos through `repos status`,
- * refusing a missing one, runs the command in each, `concurrency` at a time,
- * and reports every result. Under `--format json` without `--outfile`, the log
- * goes to stderr and stdout carries the JSON alone (`route_human_output`).
+ * Runs `gro task src/lib/gitops_run.task.ts`: resolves the config's repos
+ * through `repos status`, refusing a missing one, runs the command in each,
+ * `concurrency` at a time, and reports every result. Under `--format json`
+ * without `--outfile`, the log goes to stderr and stdout carries the JSON
+ * alone (`route_human_output`).
  *
  * @throws {TaskError} when no command is given, resolving the repos fails, or the command fails in any repo (after reporting)
  * @nodocs
@@ -148,7 +150,9 @@ export const run_gitops_run = async (
 
 	const command = _.join(' ').trim();
 	if (!command) {
-		throw new TaskError('No command provided, e.g. `gro gitops_run "npm test"`');
+		throw new TaskError(
+			'No command provided, e.g. `gro task src/lib/gitops_run.task.ts "npm test"`'
+		);
 	}
 
 	// Resolve repo paths through `repos status` (no library-metadata loading needed);

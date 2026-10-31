@@ -87,9 +87,9 @@ export type Args = s.Infer<typeof Args>;
  * inside one 2FA window — and running it again picks up from there.
  *
  * Usage:
- *   `gro gitops_release` — what the step would do; changes nothing
- *   `gro gitops_release --wetrun` — commit the rewrites, then name the wave
- *   `gro gitops_release --wetrun --wait` — wait out the registry first
+ *   `gro task src/lib/gitops_release.task.ts` — what the step would do; changes nothing
+ *   `gro task src/lib/gitops_release.task.ts --wetrun` — commit the rewrites, then name the wave
+ *   `gro task src/lib/gitops_release.task.ts --wetrun --wait` — wait out the registry first
  *
  * @nodocs
  */
@@ -310,8 +310,8 @@ export const run_gitops_release = async (
 		st(
 			'dim',
 			publish_now.length > 0
-				? 'After publishing, run `gro gitops_release --wetrun` again (add --wait to wait out the registry).'
-				: 'Run `gro gitops_release --wetrun` again once the holds above clear.'
+				? 'After publishing, run `gro task src/lib/gitops_release.task.ts --wetrun` again (add --wait to wait out the registry).'
+				: 'Run `gro task src/lib/gitops_release.task.ts --wetrun` again once the holds above clear.'
 		)
 	);
 

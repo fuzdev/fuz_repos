@@ -71,10 +71,10 @@ const default_gitops_analyze_deps: GitopsAnalyzeDeps = {
 };
 
 /**
- * Runs `gro gitops_analyze`: loads the repos as they sit, logs the readiness
- * block, and outputs the dependency analysis. Under `--format json` or
- * `markdown` without `--outfile`, the log goes to stderr and stdout carries
- * the document alone (`route_human_output`).
+ * Runs `gro task src/lib/gitops_analyze.task.ts`: loads the repos as they sit,
+ * logs the readiness block, and outputs the dependency analysis. Under
+ * `--format json` or `markdown` without `--outfile`, the log goes to stderr
+ * and stdout carries the document alone (`route_human_output`).
  *
  * @nodocs
  */

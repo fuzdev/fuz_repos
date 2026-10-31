@@ -14,7 +14,7 @@ fuz_repos is an alternative to the monorepo pattern that more loosely couples re
 With fuz_repos you can:
 
 - dynamically compose repos
-- fetch metadata about collections of repos and import it as typesafe JSON (`repos.ts`, written by `gro gitops_sync`)
+- fetch metadata about collections of repos and import it as typesafe JSON (`repos.ts`, written by `gro task src/lib/gitops_sync.task.ts`)
 - publish a generated docs website for your collections of repos
 - import its components to view and interact with repo collection metadata
 - publish metadata about your collections of repos to the web for other users and tools
@@ -65,7 +65,7 @@ npm i -D @fuzdev/fuz_repos
   or a [fine-grained GitHub token (beta)](https://github.com/settings/tokens?type=beta)
   (with `"Public Repositories (read-only)"` selected)
   in either `process.env`, a project-local `.env`, or the parent directory at `../.env`
-  (`gro gitops_sync` requires it, and you'll need to select options to support private repos)
+  (`gro task src/lib/gitops_sync.task.ts` requires it, and you'll need to select options to support private repos)
 - re-export the gitops tasks by creating files in `src/lib/`:
 
   ```ts
@@ -88,7 +88,7 @@ npm i -D @fuzdev/fuz_repos
   export * from '@fuzdev/fuz_repos/gitops_run.task.ts';
   ```
 
-- run `gro gitops_sync` to generate the dashboard's data from the repos
+- run `gro task src/lib/gitops_sync.task.ts` to generate the dashboard's data from the repos
 
 ## Architecture
 
@@ -107,9 +107,9 @@ See [CLAUDE.md](CLAUDE.md#architecture) for detailed documentation.
 ### Running commands across repos
 
 ```bash
-gro gitops_run "npm test"                  # run tests in all repos (parallel, concurrency: 5)
-gro gitops_run "npm audit" --concurrency 3 # limit parallelism
-gro gitops_run "git status" --format json  # JSON output for scripting
+gro task src/lib/gitops_run.task.ts "npm test"                  # run tests in all repos (parallel, concurrency: 5)
+gro task src/lib/gitops_run.task.ts "npm audit" --concurrency 3 # limit parallelism
+gro task src/lib/gitops_run.task.ts "git status" --format json  # JSON output for scripting
 ```
 
 **Features:**
@@ -123,9 +123,9 @@ gro gitops_run "git status" --format json  # JSON output for scripting
 ### Generating the dashboard's data
 
 ```bash
-gro gitops_sync               # fetch, check each repo, then write repos.json + repos.ts
-gro gitops_sync --check       # the readiness report alone: no fetch, no token, nothing written
-gro gitops_sync --allow_dirty # read repos off their branch, dirty, or mid-operation as they sit, warning instead
+gro task src/lib/gitops_sync.task.ts               # fetch, check each repo, then write repos.json + repos.ts
+gro task src/lib/gitops_sync.task.ts --check       # the readiness report alone: no fetch, no token, nothing written
+gro task src/lib/gitops_sync.task.ts --allow_dirty # read repos off their branch, dirty, or mid-operation as they sit, warning instead
 ```
 
 It reads each repo as it sits and never moves or installs one (`repos sync`
@@ -137,10 +137,10 @@ one behind origin.
 ### Diagnostic commands (read-only)
 
 ```bash
-gro gitops_validate           # run all validation checks (analyze + plan + CI reconcile)
-gro gitops_analyze            # analyze dependency graph, levels, and cycles
-gro gitops_plan               # the release's waves, version changes, and cascades, offline
-gro gitops_release            # preview a release step: the rewrites it would commit and the wave to publish
+gro task src/lib/gitops_validate.task.ts           # run all validation checks (analyze + plan + CI reconcile)
+gro task src/lib/gitops_analyze.task.ts            # analyze dependency graph, levels, and cycles
+gro task src/lib/gitops_plan.task.ts               # the release's waves, version changes, and cascades, offline
+gro task src/lib/gitops_release.task.ts            # preview a release step: the rewrites it would commit and the wave to publish
 ```
 
 These read each repo's working tree exactly as it sits on disk — no branch
@@ -157,9 +157,9 @@ and the publishing is yours: `gro publish` in each repo, inside one npm 2FA
 window. The tool steps between waves:
 
 ```bash
-gro gitops_release --wetrun         # rewrite released dependencies' dependents, name the wave to publish
+gro task src/lib/gitops_release.task.ts --wetrun         # rewrite released dependencies' dependents, name the wave to publish
 # publish the wave it names
-gro gitops_release --wetrun --wait  # wait out the registry, then the same for the next wave
+gro task src/lib/gitops_release.task.ts --wetrun --wait  # wait out the registry, then the same for the next wave
 ```
 
 Each step derives where the release stands from what it observes — changesets,
@@ -201,7 +201,7 @@ and the [Fuz template](https://github.com/fuzdev/fuz_template).
 
 TODO
 
-- figure out better automation than manually running `gro gitops_sync`
+- figure out better automation than manually running `gro task src/lib/gitops_sync.task.ts`
 - show the rate limit info
 - think about how fuz_repos could use both GitHub Actions and
   [Forgejo Actions](https://forgejo.org/docs/v1.20/user/actions/)

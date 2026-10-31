@@ -44,7 +44,7 @@ When no `repos.toml` is found walking up from the cwd, pass
 
 ### "held rewrite of …'s ranges" or "held publish of …"
 
-`gro gitops_release` fetches every npm repo in the config and holds a rewrite
+`gro task src/lib/gitops_release.task.ts` fetches every npm repo in the config and holds a rewrite
 or a publish in one that isn't ready, carrying on with the others. It moves no
 repo to get there; each line names what's wrong and the fix:
 
@@ -86,13 +86,13 @@ local refs, before you step.
 
 ### "not generating the site data: … on its registry branch, clean, and idle"
 
-`gro gitops_sync` writes the dashboard's `repos.json` from each repo's working
+`gro task src/lib/gitops_sync.task.ts` writes the dashboard's `repos.json` from each repo's working
 tree beside origin's CI, so it refuses a repo that would show something else:
 off the branch its registry entry follows, dirty (untracked files count), or
 mid-operation — each line names the repo, what's wrong, and the fix, as the
 release step's holds above do. It refuses before any fetch and changes nothing.
 Move the repo back, or pass `--allow_dirty` to generate from the repos as they
-sit, with each problem logged as a warning. `gro gitops_sync --check` prints
+sit, with each problem logged as a warning. `gro task src/lib/gitops_sync.task.ts --check` prints
 the same report from local refs, without a token, and exits non-zero when a
 run would refuse.
 
@@ -102,7 +102,7 @@ fetch (the last fetch's view stands).
 
 ### "not generating the site data: … dependencies installed"
 
-`gro gitops_sync` also refuses, before any fetch, an npm repo with no
+`gro task src/lib/gitops_sync.task.ts` also refuses, before any fetch, an npm repo with no
 `node_modules`, or with no `node_modules/$app/tsconfig.json` when its tsconfig
 extends `$app/tsconfig`: the library analysis would read the repo's external
 types as `any`, and gro can cache the analysis at `.gro/library.json` keyed on
@@ -110,7 +110,7 @@ the repo's commit, so that degraded library can stay until the next commit.
 Each line names the repo, what it lacks, and the fix — `npm install`,
 `gro sync` (which runs `svelte-kit sync`), or both, in that repo; `gitops_sync`
 installs nothing, and `--allow_dirty` doesn't reach this refusal.
-`gro gitops_sync --check` reports it too.
+`gro task src/lib/gitops_sync.task.ts --check` reports it too.
 
 The other tasks (`gitops_analyze`, `gitops_plan`, `gitops_release`,
 `gitops_validate`) load each repo from its `package.json` alone — no module
@@ -118,7 +118,7 @@ analysis and no `.gro/library.json` — so loading needs no installed
 dependencies (the `gro publish` you run in each repo does). A `.gro/library.json` cached by an analysis without the
 dependencies (another `library_load_from_repo` caller, or an older
 fuz_repos) stays at its commit: if the dashboard shows `any` for a repo whose
-dependencies are installed, delete it and run `gro gitops_sync` again.
+dependencies are installed, delete it and run `gro task src/lib/gitops_sync.task.ts` again.
 
 ### "couldn't read the registry, so nothing was changed"
 
@@ -211,7 +211,7 @@ knowing which case it is — check `git status` before choosing.
 Production/peer circular dependencies are plan errors that block publishing.
 You must:
 
-1. Identify the cycle in `gro gitops_analyze` output
+1. Identify the cycle in `gro task src/lib/gitops_analyze.task.ts` output
 2. Move one dependency to devDependencies
 3. Or restructure to remove the cycle
 
@@ -243,7 +243,7 @@ each repo's registry branch with the latest changes:
 
 ```bash
 repos sync       # fetch, fast-forward what's behind, push what's ahead
-gro gitops_plan  # then read the repos at rest
+gro task src/lib/gitops_plan.task.ts  # then read the repos at rest
 ```
 
 `repos sync` never switches a branch or touches uncommitted work: a repo off
@@ -282,13 +282,13 @@ and no state to go stale:
 ### View detailed dependency graph
 
 ```bash
-gro gitops_analyze --format markdown --outfile deps.md
+gro task src/lib/gitops_analyze.task.ts --format markdown --outfile deps.md
 ```
 
 ### Preview a step
 
 ```bash
-gro gitops_release  # the rewrites it would commit and the wave it would name; writes nothing
+gro task src/lib/gitops_release.task.ts  # the rewrites it would commit and the wave it would name; writes nothing
 ```
 
 ### Extra lines before the JSON on stdout

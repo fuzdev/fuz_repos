@@ -22,16 +22,16 @@ and the plan behind them.
 repos sync
 
 # 2. Validate configuration (writes nothing in git)
-gro gitops_validate
+gro task src/lib/gitops_validate.task.ts
 
 # 3. Review the waves the release will publish in
-gro gitops_plan
+gro task src/lib/gitops_plan.task.ts
 
 # 4. Step the release: rewrite released dependencies, name the wave to publish
-gro gitops_release --wetrun
+gro task src/lib/gitops_release.task.ts --wetrun
 
 # 5. Publish the named wave yourself, inside one 2FA window, then step again
-gro gitops_release --wetrun --wait
+gro task src/lib/gitops_release.task.ts --wetrun --wait
 ```
 
 ## The Release Step
@@ -39,7 +39,7 @@ gro gitops_release --wetrun --wait
 A release publishes in **waves**: a wave's packages depend only on earlier
 waves, never on each other, so they publish together. Publishing is yours —
 `gro publish` in each repo the step names, inside one npm 2FA window — and the
-tool does the rest between waves. Each `gro gitops_release` derives where the
+tool does the rest between waves. Each `gro task src/lib/gitops_release.task.ts` derives where the
 release stands from what it observes, so it keeps no state between steps and
 is safe to run any time:
 
@@ -167,7 +167,7 @@ as they'll be written.
 
 ## The Plan
 
-### `gro gitops_plan`
+### `gro task src/lib/gitops_plan.task.ts`
 
 - **Offline prediction** of the whole release: the waves, the version changes,
   and the dependency rewrites
@@ -175,7 +175,7 @@ as they'll be written.
   auto-generated changesets, and no changes — each package in exactly one
 - Asks no registry, so it counts every current version as released: a range
   trailing one shows as a rewrite (with the bump it implies), and nothing is
-  awaiting the registry. `gro gitops_release` plans the same way from what the
+  awaiting the registry. `gro task src/lib/gitops_release.task.ts` plans the same way from what the
   registry shows
 - `--format json` carries `waves`, `no_changes` (package names) apart from
   `info` (informational sentences: excluded non-npm repos, dev dependency
@@ -204,7 +204,7 @@ A package's wave is one past the deepest wave among the packages it depends on
 (prod/peer) that also publish; a dependency that doesn't publish doesn't
 count. So a wave's packages never depend on each other, and the waves are as
 few as the dependency chains allow. Within a wave, packages follow config
-order. `gro gitops_analyze` shows the same grouping over every package, as
+order. `gro task src/lib/gitops_analyze.task.ts` shows the same grouping over every package, as
 dependency levels.
 
 ## Readiness
@@ -309,19 +309,19 @@ Before a release, validate your configuration:
 repos sync
 
 # 2. Run comprehensive validation (writes nothing in git)
-gro gitops_validate
+gro task src/lib/gitops_validate.task.ts
 
 # 3. Review analyze output
-gro gitops_analyze
+gro task src/lib/gitops_analyze.task.ts
 
 # 4. Review the plan's waves
-gro gitops_plan
+gro task src/lib/gitops_plan.task.ts
 
 # 5. Preview the first step (writes nothing)
-gro gitops_release
+gro task src/lib/gitops_release.task.ts
 
 # 6. Step the release
-gro gitops_release --wetrun
+gro task src/lib/gitops_release.task.ts --wetrun
 ```
 
 ### Output Formats
@@ -329,8 +329,8 @@ gro gitops_release --wetrun
 Save analysis or plans to files for review:
 
 ```bash
-gro gitops_analyze --format json --outfile analysis.json
-gro gitops_plan --format markdown --outfile plan.md
+gro task src/lib/gitops_analyze.task.ts --format json --outfile analysis.json
+gro task src/lib/gitops_plan.task.ts --format markdown --outfile plan.md
 ```
 
 Without `--outfile`, a `--format json` or `markdown` report goes to stdout, and
@@ -354,14 +354,14 @@ gro changeset
 git commit -m "add changeset"  # the step holds a repo with uncommitted changes
 
 # See what the step would do
-gro gitops_release
+gro task src/lib/gitops_release.task.ts
 # Publish now (one 2FA window):
 #   cd ../my-package && gro publish
 
 cd ../my-package && gro publish
 
 # Rewrite its dependents once it shows on the registry, and name the next wave
-gro gitops_release --wetrun --wait
+gro task src/lib/gitops_release.task.ts --wetrun --wait
 ```
 
 ### Publishing a cascade
@@ -369,7 +369,7 @@ gro gitops_release --wetrun --wait
 ```bash
 # You have changesets in @my/core; @my/ui depends on @my/core
 
-gro gitops_plan
+gro task src/lib/gitops_plan.task.ts
 # Waves (each publishes together, after the ones above):
 #   1. @my/core
 #   2. @my/ui
@@ -377,18 +377,18 @@ gro gitops_plan
 #   [2/2] @my/ui: 1.5.0 → 2.0.0 (major) [auto-changeset] BREAKING
 #         triggered by: @my/core (BREAKING)
 
-gro gitops_release --wetrun   # names @my/core
+gro task src/lib/gitops_release.task.ts --wetrun   # names @my/core
 # publish @my/core
-gro gitops_release --wetrun --wait   # rewrites @my/ui with its changeset, names it
+gro task src/lib/gitops_release.task.ts --wetrun --wait   # rewrites @my/ui with its changeset, names it
 # publish @my/ui
-gro gitops_release --wetrun --wait   # nothing to release
+gro task src/lib/gitops_release.task.ts --wetrun --wait   # nothing to release
 ```
 
 ### Picking up a release
 
 ```bash
 # A wave went out, but the step after it never ran — or a package was published by hand
-gro gitops_release --wetrun
+gro task src/lib/gitops_release.task.ts --wetrun
 # The registry shows the released versions, so the dependents still trailing
 # them are rewritten (with their auto-changesets), and the next wave is named.
 ```
@@ -399,7 +399,7 @@ gro gitops_release --wetrun
 # You created a patch changeset for @my/app
 # But @my/core (dependency) has a breaking change
 
-gro gitops_plan
+gro task src/lib/gitops_plan.task.ts
 # Output:
 #   [1/2] @my/core: 1.0.0 → 2.0.0 (major) BREAKING
 #   [2/2] @my/app: 2.0.0 → 3.0.0 (major) [patch → major] BREAKING

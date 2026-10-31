@@ -58,13 +58,13 @@ export type Args = s.Infer<typeof Args>;
 /**
  * Generate a publishing plan showing what a release would publish, offline: the
  * waves, version changes, dependency updates, and breaking change cascades.
- * It asks no registry, so every current version counts as released; `gro
- * gitops_release` plans from what the registry shows.
+ * It asks no registry, so every current version counts as released;
+ * `gro task src/lib/gitops_release.task.ts` plans from what the registry shows.
  *
  * Usage:
- *   `gro gitops_plan`
- *   `gro gitops_plan --registry ../repos.toml`
- *   `gro gitops_plan --config ./custom.config.ts`
+ *   `gro task src/lib/gitops_plan.task.ts`
+ *   `gro task src/lib/gitops_plan.task.ts --registry ../repos.toml`
+ *   `gro task src/lib/gitops_plan.task.ts --config ./custom.config.ts`
  *
  * @nodocs
  */
@@ -94,10 +94,10 @@ const default_gitops_plan_deps: GitopsPlanDeps = {
 };
 
 /**
- * Runs `gro gitops_plan`: loads the repos as they sit, logs the readiness
- * block, generates the plan, and outputs it. Under `--format json` or
- * `markdown` without `--outfile`, the log goes to stderr and stdout carries
- * the document alone (`route_human_output`).
+ * Runs `gro task src/lib/gitops_plan.task.ts`: loads the repos as they sit,
+ * logs the readiness block, generates the plan, and outputs it. Under
+ * `--format json` or `markdown` without `--outfile`, the log goes to stderr
+ * and stdout carries the document alone (`route_human_output`).
  *
  * @throws {Error} when the plan has errors that would block publishing, after outputting it
  * @nodocs

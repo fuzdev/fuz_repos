@@ -113,7 +113,13 @@ export const task: Task<Args> = {
 		const cache = await create_fs_fetch_value_cache('repos');
 
 		log.info('fetching remote repo data');
-		const repos_json = await fetch_repo_data({ local_repos, token, cache: cache.data, log });
+		const repos_json = await fetch_repo_data({
+			local_repos,
+			token,
+			cache: cache.data,
+			log,
+			fetch: globalThis.fetch
+		});
 
 		// TODO should package_json be provided in the Gro task/gen contexts? check if it's always loaded
 		const repo_specifier =

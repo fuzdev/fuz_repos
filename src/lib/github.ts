@@ -40,8 +40,8 @@ export const fetch_github_pull_requests = async (
 		log?: Logger;
 		token?: string;
 		api_version?: string;
-		fetch?: typeof globalThis.fetch;
-	} = {}
+		fetch: typeof globalThis.fetch;
+	}
 ): Promise<GithubPullRequests | null> => {
 	const { cache, log, token, api_version, fetch } = options;
 	if (!repo_info.owner_name) throw Error('owner_name is required');
@@ -109,8 +109,8 @@ export const fetch_github_check_runs = async (
 		token?: string;
 		api_version?: string;
 		ref?: string;
-		fetch?: typeof globalThis.fetch;
-	} = {}
+		fetch: typeof globalThis.fetch;
+	}
 ): Promise<Result<{ value: GithubCheckRunsItem | null }, { status: number; message: string }>> => {
 	const { cache, log, token, api_version, ref = 'main', fetch } = options;
 	if (!repo_info.owner_name) throw Error('owner_name is required');

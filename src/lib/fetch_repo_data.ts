@@ -25,8 +25,8 @@ export interface FetchRepoDataOptions {
 	delay?: number;
 	/** Sent as the `x-github-api-version` header when set. */
 	github_api_version?: string;
-	/** The `fetch` the API requests go through. Defaults to `globalThis.fetch`. */
-	fetch?: typeof globalThis.fetch;
+	/** The `fetch` the API requests go through, handed in by the caller. */
+	fetch: typeof globalThis.fetch;
 }
 
 /**

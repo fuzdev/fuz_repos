@@ -21,11 +21,11 @@
 	<div class="p_lg">
 		<PageHeader repo={library}></PageHeader>
 	</div>
-	<EcosystemLinksPanel />
-	<section class="box width:100% mb_lg">
+	<section class="box mb_lg">
 		<div class="panel p_md width_atmost_md">
 			<LibrarySummary {library} />
 		</div>
 	</section>
+	<EcosystemLinksPanel />
 	<PageFooter />
 </main>

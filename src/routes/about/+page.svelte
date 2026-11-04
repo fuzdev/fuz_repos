@@ -1,5 +1,5 @@
 <script lang="ts">
-	import LibraryDetail from '@fuzdev/fuz_ui/LibraryDetail.svelte';
+	import LibrarySummary from '@fuzdev/fuz_ui/LibrarySummary.svelte';
 	import EcosystemLinksPanel from '@fuzdev/fuz_ui/EcosystemLinksPanel.svelte';
 	import { Library, library_context } from '@fuzdev/fuz_ui/library.svelte.ts';
 	import { site_context } from '@fuzdev/fuz_ui/site.svelte.ts';
@@ -24,7 +24,7 @@
 	<EcosystemLinksPanel />
 	<section class="box width:100% mb_lg">
 		<div class="panel p_md width_atmost_md">
-			<LibraryDetail {library} />
+			<LibrarySummary {library} />
 		</div>
 	</section>
 	<PageFooter />

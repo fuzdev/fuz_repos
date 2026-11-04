@@ -5,7 +5,6 @@
 
 	import type { Repo } from './repo.svelte.ts';
 	import ReposTreeNav from './ReposTreeNav.svelte';
-	import LibraryDetail from '@fuzdev/fuz_ui/LibraryDetail.svelte';
 
 	const {
 		repos,
@@ -25,13 +24,7 @@
 	{#if selected_repo}
 		<section class="detail-wrapper">
 			<div class="panel detail p_md">
-				<!--
-					`links_full` points the module/declaration links at each repo's own
-					deployed docs (`homepage_url`-based) rather than this site's local
-					`/docs/api/*`, which only knows fuz_repos's own modules — otherwise
-					the foreign links dangle.
-				-->
-				<LibraryDetail library={selected_repo.library} links_full />
+				<LibrarySummary library={selected_repo.library} />
 			</div>
 		</section>
 	{:else}

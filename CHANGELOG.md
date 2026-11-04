@@ -1,5 +1,16 @@
 # @fuzdev/fuz_repos
 
+## 0.90.0
+
+### Minor Changes
+
+- **breaking** feat: `fetch_repo_data`, `fetch_github_pull_requests`, and `fetch_github_check_runs` require `fetch`, no longer defaulting to `globalThis.fetch` ([7b3bd58](https://github.com/fuzdev/fuz_repos/commit/7b3bd58))
+- break: `ReposTree` renders the selected repo with `LibrarySummary` since `LibraryDetail` is removed from fuz_ui ([9f3f03c](https://github.com/fuzdev/fuz_repos/commit/9f3f03c))
+
+### Patch Changes
+
+- fix: hints, errors, and docs name the `gro task src/lib/gitops_*.task.ts` form, since gro 0.224 runs a project task only by path and a bare `gro gitops_sync` is taken as a builtin name ([6a1aacf](https://github.com/fuzdev/fuz_repos/commit/6a1aacf))
+
 ## 0.89.0
 
 ### Minor Changes

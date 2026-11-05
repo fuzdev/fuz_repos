@@ -274140,7 +274140,7 @@
 								}
 							}
 						],
-						"moduleComment": "Single source of truth for the public `@fuzdev` stack repos — reusable\nmetadata describing each repo's workspace directory, package name, editorial\ncategory, and language. Consumed by the stack generators (`src/routes/stack.gen.ts`\nand `src/routes/docs/stack/stack_graph.gen.ts`) so the repo list lives in one\nplace instead of drifting across separate hardcoded copies.\n\nExplicit allowlist, never globbed: a stray `private_*` clone in the workspace\nmust never leak into generated output. Personal sites (`ryanatkn.com`,\n`webdevladder.net`) are intentionally excluded — this is the `@fuzdev`\necosystem stack, not every repo in the workspace. Cargo-only repos with no\n`package.json` (tsv) are excluded until the generators support\nmanifest-less repos.",
+						"moduleComment": "Single source of truth for the public `@fuzdev` stack repos — reusable\nmetadata describing each repo's workspace directory, package name, editorial\ncategory, and language. Consumed by the stack generators (`src/routes/stack.gen.ts`\nand `src/routes/docs/stack/stack_graph.gen.ts`) so the repo list lives in one\nplace instead of drifting across separate hardcoded copies.\n\nExplicit allowlist, never globbed: a stray `private_*` clone in the workspace\nmust never leak into generated output. Personal sites like\n`ryanatkn.com` are intentionally excluded — this is the `@fuzdev`\necosystem stack, not every repo in the workspace. Cargo-only repos with no\n`package.json` (tsv) are excluded until the generators support\nmanifest-less repos.",
 						"dependencies": [
 							"stack_graph_types.ts"
 						]

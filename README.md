@@ -189,12 +189,13 @@ repos push            # push the branch checked out here, as a fast-forward (reb
 
 **Documentation:**
 
-- ./CLAUDE.md - Architecture, commands, testing patterns
-- ./docs/publishing.md - The release step, changeset
+- [CLAUDE.md](CLAUDE.md) - Architecture, commands, testing patterns
+- [fuz-stack skill](https://docs.fuz.dev/skills/fuz-stack) - Coding conventions shared across the Fuz stack
+- [docs/publishing.md](docs/publishing.md) - The release step, changeset
   semantics, examples
-- ./docs/troubleshooting.md - Common errors and
+- [docs/troubleshooting.md](docs/troubleshooting.md) - Common errors and
   debugging tips
-- ./docs/repos.md - The `repos` command reference
+- [docs/repos.md](docs/repos.md) - The `repos` command reference
 
 Getting started as a dev? Start with [Gro](https://github.com/fuzdev/gro)
 and the [Fuz template](https://github.com/fuzdev/fuz_template).

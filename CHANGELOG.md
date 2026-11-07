@@ -1,5 +1,11 @@
 # @fuzdev/fuz_repos
 
+## 0.91.0
+
+### Minor Changes
+
+- break: upgrade to fuz_css 0.76 and fuz_ui 0.224 - the `@fuzdev/fuz_css` peer is `>=0.76.0` and the `@fuzdev/fuz_ui` peer `>=0.224.0` ([3ddb32c](https://github.com/fuzdev/fuz_repos/commit/3ddb32c))
+
 ## 0.90.1
 
 ### Patch Changes

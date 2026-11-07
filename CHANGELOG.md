@@ -1,5 +1,11 @@
 # @fuzdev/fuz_repos
 
+## 0.90.1
+
+### Patch Changes
+
+- fix: a Rust-only repo takes its name and URL from the registry, not its root `Cargo.toml`, so a root crate named unlike the repo no longer breaks its CI and pull request fetches ([95024d5](https://github.com/fuzdev/fuz_repos/commit/95024d5))
+
 ## 0.90.0
 
 ### Minor Changes

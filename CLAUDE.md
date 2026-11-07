@@ -585,8 +585,9 @@ interface LocalRepoPath {
 A configured repo without a `package.json` but with a Rust `Cargo.toml` (e.g.
 `tsv`) loads as a `kind: 'cargo'` `LocalRepo`. It has no npm identity, so there's
 no `svelte-docinfo` analysis and no dependency graph — `local_repo.ts` synthesizes
-a lightweight `Library` from the `Cargo.toml` (best-effort name/version/description,
-via `cargo_toml.ts`), falling back to the registry key and URL. These repos are still
+a lightweight `Library` named by the registry key and URL (the GitHub fetches
+derive the repo from them), with best-effort version/description from the root
+`Cargo.toml` (via `cargo_toml.ts`). These repos are still
 rendered on the dashboard (CI status, PRs, identity) but are excluded from
 publishing and dependency analysis: `generate_publishing_plan`, `analyze_repos`,
 and the release step filter to `repo_is_npm` first. A repo with neither

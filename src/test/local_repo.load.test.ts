@@ -48,7 +48,7 @@ describe('local_repo_load', () => {
 		}
 	});
 
-	test('uses Cargo.toml [package] identity for a single-crate repo', async () => {
+	test('takes identity from the registry, version and description from Cargo.toml [package]', async () => {
 		const dir = mkdtempSync(join(tmpdir(), 'gitops-cargo-'));
 		try {
 			writeFileSync(
@@ -62,10 +62,11 @@ describe('local_repo_load', () => {
 			});
 
 			assert.strictEqual(repo.kind, 'cargo');
-			assert.strictEqual(repo.library.name, 'my_crate');
+			// A root crate named unlike its repo (a workspace's test package) doesn't rename it.
+			assert.strictEqual(repo.library.name, 'rust-repo');
+			assert.strictEqual(repo.library.repo_url, 'https://github.com/test/rust-repo');
 			assert.strictEqual(repo.package_json.version, '1.2.3');
 			assert.strictEqual(repo.package_json.description, 'does a thing');
-			assert.strictEqual(repo.library.repo_url, 'https://github.com/owner/my_crate');
 		} finally {
 			rmSync(dir, { recursive: true, force: true });
 		}

@@ -238,9 +238,10 @@ export const repo_is_npm = (repo: LocalRepo): boolean => repo.kind === 'npm';
 /**
  * Loads a non-npm Rust repo as a dashboard-only `LocalRepo`. It has no
  * `package.json`, so there's no `svelte-docinfo` analysis and no npm dependency
- * graph — a lightweight `Library` is synthesized from the repo's `Cargo.toml`
- * (best-effort name/version/description) and its registry URL, which is
- * what the dashboard renders (CI status, PRs, identity). Marked `private` so it
+ * graph — a lightweight `Library` is synthesized from its registry key and URL
+ * (the identity the GitHub fetches use) plus the root `Cargo.toml`'s
+ * best-effort version and description, which is what the dashboard renders
+ * (CI status, PRs, identity). Marked `private` so it
  * never reads as an npm publish target, and tagged `cargo` so the publishing and
  * analysis paths skip it (see `repo_is_npm`).
  */
@@ -253,12 +254,13 @@ const local_repo_load_cargo = async ({
 
 	const cargo = await cargo_toml_load(repo_dir);
 
-	// A Cargo workspace root has no `name` or `repository`, so fall back to the
-	// registry key and URL.
+	// Identity is the registry's: a root `Cargo.toml` may name a crate other
+	// than the repo (a workspace root's own test package), and the GitHub
+	// fetches derive the repo from this name.
 	const package_json: PackageJson = {
-		name: cargo?.name ?? repo_name,
+		name: repo_name,
 		version: cargo?.version ?? '0.0.0',
-		repository: cargo?.repository ?? repo_url,
+		repository: repo_url,
 		private: true,
 		...(cargo?.description ? { description: cargo.description } : null)
 	};

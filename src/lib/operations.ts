@@ -42,7 +42,6 @@
  */
 
 import type { Result } from '@fuzdev/fuz_util/result.ts';
-import type { FsError } from '@fuzdev/fuz_util/fs.ts';
 import type { Logger } from '@fuzdev/fuz_util/log.ts';
 import type { LocalRepo } from './local_repo.ts';
 import type { ChangesetInfo } from './changeset_reader.ts';
@@ -167,11 +166,20 @@ export interface NpmOperations {
 }
 
 /**
+ * The typed error of a failed `FsOperations` call, discriminated on `kind`.
+ */
+export type FsError =
+	| { kind: 'not_found'; message: string }
+	| { kind: 'permission_denied'; message: string }
+	| { kind: 'already_exists'; message: string }
+	| { kind: 'io_error'; message: string };
+
+/**
  * File system operations for reading and writing files.
  *
  * Errors are typed via `FsError` (`not_found | permission_denied |
  * already_exists | io_error`) so callers can branch on `kind` instead of
- * regex-matching `message`. See `@fuzdev/fuz_util/fs.ts`.
+ * regex-matching `message`.
  */
 export interface FsOperations {
 	/**

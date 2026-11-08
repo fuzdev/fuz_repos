@@ -9,7 +9,7 @@
 
 import { spawn_out, spawn_result_to_message } from '@fuzdev/fuz_util/process.ts';
 import { readFile, writeFile, mkdir, stat } from 'node:fs/promises';
-import { fs_classify_error } from '@fuzdev/fuz_util/fs.ts';
+import { to_error_message } from '@fuzdev/fuz_util/error.ts';
 
 import { has_changesets, read_changesets, predict_next_version } from './changeset_reader.ts';
 import { wait_for_package } from './npm_registry.ts';
@@ -18,6 +18,7 @@ import type {
 	ChangesetOperations,
 	GitOperations,
 	NpmOperations,
+	FsError,
 	FsOperations,
 	ReposOperations
 } from './operations.ts';
@@ -147,6 +148,26 @@ export const default_npm_operations: NpmOperations = {
 			return { ok: false, message: String(error) };
 		}
 	}
+};
+
+/**
+ * Classifies a thrown filesystem error by its Node `code`. Unknown codes and
+ * values without one are `io_error`.
+ */
+const fs_classify_error = (error: unknown): FsError => {
+	const message = to_error_message(error);
+	if (error && typeof error === 'object' && 'code' in error) {
+		switch ((error as { code: string }).code) {
+			case 'ENOENT':
+				return { kind: 'not_found', message };
+			case 'EACCES':
+			case 'EPERM':
+				return { kind: 'permission_denied', message };
+			case 'EEXIST':
+				return { kind: 'already_exists', message };
+		}
+	}
+	return { kind: 'io_error', message };
 };
 
 export const default_fs_operations: FsOperations = {

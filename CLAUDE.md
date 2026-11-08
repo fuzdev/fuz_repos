@@ -173,7 +173,7 @@ clones' lazy fetching — is in docs/repos.md: [status](docs/repos.md#repos-stat
   multiplies its mistakes.
 - **Secrets and env files.** fuz_repos never stores, transports, or reads
   secret material as data — not as a convenience, not behind a flag. Its own
-  operating credential (`SECRET_GITHUB_API_TOKEN`, read from `.env` and sent
+  operating credential (`SECRET_GITHUB_API_TOKEN`, read from `.env` or `../.env` and sent
   only to the GitHub API) is the tool authenticating itself, not fleet secrets
   passing through it. A gitops config is committed and often public-adjacent;
   a tool that reads it should never be somewhere secrets could land. Reporting
@@ -389,7 +389,7 @@ unknown, names a third-party reference, or its repo is missing (`repos sync
 <key>` clones it), isn't a git repo, or failed to probe. Repos keep the
 config's order.
 
-Requires `SECRET_GITHUB_API_TOKEN` in `.env` for API access.
+Requires `SECRET_GITHUB_API_TOKEN` in `.env` or `../.env` for API access.
 
 ## Main operations
 

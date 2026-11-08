@@ -6,6 +6,8 @@ import { format_file } from '@fuzdev/gro/format_file.ts';
 import { basename, join, resolve } from 'node:path';
 import { print_path } from '@fuzdev/gro/paths.ts';
 import { load_from_env } from '@fuzdev/gro/env.ts';
+import { fs } from '@fuzdev/gro/fs.ts';
+import { create_fs_paths } from '@fuzdev/gro/fs_paths.ts';
 import { package_json_load } from '@fuzdev/gro/package_json.ts';
 import { existsSync, readFileSync } from 'node:fs';
 import { styleText as st } from 'node:util';
@@ -22,7 +24,6 @@ import {
 	local_repos_load,
 	local_repos_resolve,
 	type LocalRepo,
-	type LocalRepoLoadOptions,
 	type LocalRepoPath
 } from './local_repo.ts';
 import { load_repos_status, to_repos_command } from './repos_status_load.ts';
@@ -94,7 +95,7 @@ export const task: Task<Args> = {
 		// The generated `repos.json` is the host project's site data, so a public host
 		// must never carry a private repo's metadata: `host` refuses the private repos
 		// the registry declares, before any fetch.
-		const package_json = await package_json_load();
+		const package_json = await package_json_load(fs_paths);
 
 		const prepared = await prepare_gitops_sync({
 			config,
@@ -211,22 +212,27 @@ export interface GitopsSyncDeps {
 	/** Runs `repos status`. */
 	repos_ops: ReposOperations;
 	/** Loads each resolved repo's library as it sits (`local_repos_load`). */
-	load_repos: (
-		options: LocalRepoLoadOptions & { local_repo_paths: Array<LocalRepoPath> }
-	) => Promise<Array<LocalRepo>>;
+	load_repos: (options: {
+		local_repo_paths: Array<LocalRepoPath>;
+		modules: true;
+		log?: Logger;
+	}) => Promise<Array<LocalRepo>>;
 	/** Reads `SECRET_GITHUB_API_TOKEN`; `undefined` when it isn't set. */
-	load_token: () => string | undefined;
+	load_token: () => Promise<string | undefined>;
 	/** Whether a path exists, for the analysis-setup check. */
 	exists: (path: string) => boolean;
 	/** Reads a file as UTF-8, for the analysis-setup check. */
 	read_file: (path: string) => string;
 }
 
+const fs_paths = create_fs_paths(fs);
+
 const default_gitops_sync_deps: GitopsSyncDeps = {
 	repos_ops: default_repos_operations,
-	load_repos: local_repos_load,
-	// this searches the parent directory for the env var, so we don't use SvelteKit's $env imports
-	load_token: () => load_from_env('SECRET_GITHUB_API_TOKEN') || undefined,
+	load_repos: (options) => local_repos_load({ ...options, fs_paths }),
+	// searches `process.env`, the project's `.env`, then the parent directory's `.env`,
+	// which SvelteKit's env modules don't, so it doesn't use them
+	load_token: () => load_from_env(fs_paths, 'SECRET_GITHUB_API_TOKEN', ['.env', '../.env']),
 	exists: existsSync,
 	read_file: (path) => readFileSync(path, 'utf8')
 };
@@ -298,7 +304,7 @@ export const prepare_gitops_sync = async (
 	}
 	if (refusals.length > 0) throw new TaskError(refusals.join('\n'));
 
-	const token = load_token();
+	const token = await load_token();
 	if (!token) {
 		throw new TaskError('the env var SECRET_GITHUB_API_TOKEN was not found');
 	}

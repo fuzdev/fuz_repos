@@ -87,7 +87,7 @@ const create_recording_deps = (
 					return repo;
 				});
 			},
-			load_token: () => {
+			load_token: async () => {
 				steps.push('token');
 				return token || undefined;
 			},

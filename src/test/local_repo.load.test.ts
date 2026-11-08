@@ -1,5 +1,7 @@
 import { assert, describe, test } from 'vitest';
 import { assert_rejects } from '@fuzdev/fuz_util/testing.ts';
+import { fs } from '@fuzdev/gro/fs.ts';
+import { create_fs_paths } from '@fuzdev/gro/fs_paths.ts';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -75,12 +77,15 @@ describe('local_repo_load', () => {
 	test('a repo with neither package.json nor Cargo.toml still fails as a metadata-load error', async () => {
 		const dir = mkdtempSync(join(tmpdir(), 'gitops-empty-'));
 		try {
-			for (const modules of [true, false]) {
-				await assert_rejects(
-					() => local_repo_load({ local_repo_path: temp_local_repo_path(dir), modules }),
-					/Failed to load library metadata/
-				);
-			}
+			const local_repo_path = temp_local_repo_path(dir);
+			await assert_rejects(
+				() => local_repo_load({ local_repo_path, modules: true, fs_paths: create_fs_paths(fs) }),
+				/Failed to load library metadata/
+			);
+			await assert_rejects(
+				() => local_repo_load({ local_repo_path, modules: false }),
+				/Failed to load library metadata/
+			);
 		} finally {
 			rmSync(dir, { recursive: true, force: true });
 		}

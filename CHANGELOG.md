@@ -1,5 +1,14 @@
 # @fuzdev/fuz_repos
 
+## 0.93.0
+
+### Minor Changes
+
+- break: require `@fuzdev/gro` >=0.227.0: `local_repo_load` and `local_repos_load` take `fs_paths` with `modules: true`, `GitopsSyncDeps.load_token` is async, and `LocalRepoLoadOptions` is now a union rather than an interface, so a `boolean` variable for `modules` without `fs_paths`, or an `interface X extends` of it, no longer compiles ([9e4bbac](https://github.com/fuzdev/fuz_repos/commit/9e4bbac))
+  
+  `gitops_sync` reads `SECRET_GITHUB_API_TOKEN` from `process.env`, the project's `.env`, then `../.env`
+- `FsError` is now exported from `operations.ts` instead of imported from `@fuzdev/fuz_util/fs.ts` ([57238d2](https://github.com/fuzdev/fuz_repos/commit/57238d2))
+
 ## 0.92.0
 
 ### Minor Changes

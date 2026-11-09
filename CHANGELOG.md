@@ -1,5 +1,11 @@
 # @fuzdev/fuz_repos
 
+## 0.95.0
+
+### Minor Changes
+
+- **breaking** feat: move git, npm, repos, and shell spawning onto gro's spawn host module: `git_add` and `git_commit` take a `git` `SpawnProgram` first and a `cwd` handle, `check_package_available` and `wait_for_package` require their deps, `default_npm_registry_deps` is gone in favor of `create_npm_operations`, and `spawn_capture` is added ([6db0000](https://github.com/fuzdev/fuz_repos/commit/6db0000))
+
 ## 0.94.0
 
 ### Minor Changes

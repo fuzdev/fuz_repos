@@ -21,6 +21,7 @@ const create_fake_npm = (output: {
 		path: '/fake/npm',
 		run: fail_on_call,
 		start: fail_on_call,
+		out_bytes: fail_on_call,
 		out: async (args): Promise<SpawnOutput> => {
 			calls.push(args);
 			return { kind: 'exited', stdout: '', stderr: '', truncated: false, ...output };

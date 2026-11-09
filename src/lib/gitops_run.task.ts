@@ -5,8 +5,9 @@ import { meta } from '@fuzdev/fuz_schema/meta.ts';
 import { map_concurrent_settled } from '@fuzdev/fuz_util/async.ts';
 import { to_error_message } from '@fuzdev/fuz_util/error.ts';
 import { to_spawn_result_message } from '@fuzdev/gro/cli.ts';
-import { fs } from '@fuzdev/gro/fs.ts';
-import { spawn } from '@fuzdev/gro/spawn.ts';
+import { fs, type FsReadDir } from '@fuzdev/gro/fs.ts';
+import { spawn, type SpawnProgram } from '@fuzdev/gro/spawn.ts';
+import { Buffer } from 'node:buffer';
 import { writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { styleText as st } from 'node:util';
@@ -16,7 +17,6 @@ import { GITOPS_CONCURRENCY_DEFAULT, GITOPS_CONFIG_PATH_DEFAULT } from './gitops
 import type { ReposOperations } from './operations.ts';
 import { default_repos_operations } from './operations_defaults.ts';
 import { output_is_machine, route_human_output } from './output_helpers.ts';
-import { spawn_capture } from './spawn_capture.ts';
 
 /** @nodocs */
 export const Args = s.object({
@@ -57,7 +57,7 @@ export type Args = s.Infer<typeof Args>;
 
 /**
  * How a command run in one repo ended: it exited with a code, a signal killed
- * it, or it never started.
+ * it, or it hit an error: it never started, or passed the output limit.
  *
  * @nodocs
  */
@@ -75,6 +75,8 @@ export interface GitopsRunCommandOutput {
 	outcome: GitopsRunOutcome;
 	stdout: string;
 	stderr: string;
+	/** Whether output may be missing from the end of `stdout` or `stderr`. */
+	truncated: boolean;
 }
 
 /**
@@ -93,7 +95,12 @@ export interface GitopsRunResult {
 	stdout: string;
 	stderr: string;
 	duration_ms: number;
-	/** Why the command never started. */
+	/**
+	 * Whether output may be missing from the end of `stdout` or `stderr`: the command passed the
+	 * output limit, or a process it left running held a pipe past the wait for it.
+	 */
+	truncated: boolean;
+	/** Why the command never started, or that it passed the output limit and was killed. */
 	error?: string;
 }
 
@@ -109,28 +116,62 @@ export interface GitopsRunDeps {
 	run_command: (options: { command: string; cwd: string }) => Promise<GitopsRunCommandOutput>;
 }
 
+/** The most bytes kept of each of a command's stdout and stderr. */
+const GITOPS_RUN_MAX_OUTPUT_BYTES = 64 * 1024 * 1024;
+
+/**
+ * Runs `command` through `sh`, so pipes, redirects, and globs work. The command is the user's,
+ * so `sh` should carry their whole environment, and it stays in the terminal's session.
+ *
+ * @param sh - the shell program
+ * @param command - the shell command
+ * @param cwd - the directory to run it in
+ * @returns how it ended, and its output
+ * @throws `SpawnError` - if the shell can't start
+ * @nodocs
+ */
+export const gitops_run_in_shell = async (
+	sh: SpawnProgram,
+	command: string,
+	cwd: FsReadDir
+): Promise<GitopsRunCommandOutput> => {
+	const output = await sh.out(['-c', command], {
+		cwd,
+		stdin: 'inherit',
+		max_bytes: GITOPS_RUN_MAX_OUTPUT_BYTES
+	});
+	const { stdout, stderr, truncated } = output;
+	// the limit's kill isn't the command failing on its own. The cap keeps exactly `max_bytes` and
+	// decoding never shrinks them, so a `SIGKILL` short of it came from elsewhere, the output cut by
+	// a background process holding a pipe, and it keeps the command's own ending
+	const at_limit =
+		Buffer.byteLength(stdout) >= GITOPS_RUN_MAX_OUTPUT_BYTES ||
+		Buffer.byteLength(stderr) >= GITOPS_RUN_MAX_OUTPUT_BYTES;
+	if (truncated && at_limit && output.kind === 'signaled' && output.signal === 'SIGKILL') {
+		const message = 'output limit hit: stdout or stderr passed 64 MiB, so the command was killed';
+		return { outcome: { kind: 'error', message }, stdout, stderr, truncated };
+	}
+	const outcome: GitopsRunOutcome =
+		output.kind === 'exited'
+			? { kind: 'exited', code: output.code }
+			: output.kind === 'signaled'
+				? { kind: 'signaled', signal: output.signal }
+				: { kind: 'error', message: to_spawn_result_message(output) };
+	return { outcome, stdout, stderr, truncated };
+};
+
 const default_gitops_run_deps: GitopsRunDeps = {
 	repos_ops: default_repos_operations,
 	run_command: async ({ command, cwd }) => {
 		try {
-			// through a shell, so pipes, redirects, and globs work; the command is the user's,
-			// so it gets their whole environment and stays in the terminal's session
 			const sh = spawn.program('sh', { pass_env: 'all' });
-			const output = await spawn_capture(sh, ['-c', command], {
-				cwd: await fs.open_dir(resolve(cwd))
-			});
-			const outcome: GitopsRunOutcome =
-				output.kind === 'exited'
-					? { kind: 'exited', code: output.code }
-					: output.kind === 'signaled'
-						? { kind: 'signaled', signal: output.signal }
-						: { kind: 'error', message: to_spawn_result_message(output) };
-			return { outcome, stdout: output.stdout, stderr: output.stderr };
+			return await gitops_run_in_shell(sh, command, await fs.open_dir(resolve(cwd)));
 		} catch (error) {
 			return {
 				outcome: { kind: 'error', message: to_error_message(error) },
 				stdout: '',
-				stderr: ''
+				stderr: '',
+				truncated: false
 			};
 		}
 	}
@@ -191,7 +232,10 @@ export const run_gitops_run = async (
 		concurrency,
 		async ({ repo_name, repo_dir }): Promise<GitopsRunResult> => {
 			const repo_start = performance.now();
-			const { outcome, stdout, stderr } = await run_command({ command, cwd: repo_dir });
+			const { outcome, stdout, stderr, truncated } = await run_command({
+				command,
+				cwd: repo_dir
+			});
 			return {
 				repo_name,
 				repo_dir,
@@ -200,6 +244,7 @@ export const run_gitops_run = async (
 				signal: outcome.kind === 'signaled' ? outcome.signal : null,
 				stdout,
 				stderr,
+				truncated,
 				duration_ms: performance.now() - repo_start,
 				...(outcome.kind === 'error' && { error: outcome.message })
 			};
@@ -224,6 +269,7 @@ export const run_gitops_run = async (
 				signal: null,
 				stdout: '',
 				stderr: '',
+				truncated: false,
 				duration_ms: 0,
 				error: to_error_message(result.reason)
 			});
@@ -261,6 +307,9 @@ export const run_gitops_run = async (
 	}
 };
 
+const TRUNCATED_WARNING =
+	'    output may be incomplete: it passed the output limit, or a process left running held a pipe';
+
 const log_text_results = (
 	data: {
 		successes: Array<GitopsRunResult>;
@@ -292,6 +341,7 @@ const log_text_results = (
 					log.info(st('gray', `    ${line}`));
 				}
 			}
+			if (result.truncated) log.warn(st('yellow', TRUNCATED_WARNING));
 		}
 	}
 
@@ -310,6 +360,9 @@ const log_text_results = (
 			} else if (result.exit_code !== null) {
 				log.error(st('gray', `    Exit code: ${result.exit_code}`));
 			}
+
+			// the limit's own error already says so
+			if (result.truncated && !result.error) log.warn(st('yellow', TRUNCATED_WARNING));
 
 			if (result.stderr) {
 				// Show first few lines of stderr

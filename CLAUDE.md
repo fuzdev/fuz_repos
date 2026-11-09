@@ -259,7 +259,9 @@ Every `src/lib` module is listed here or under
 - `src/lib/gitops_release.task.ts` - one release step: observes, rewrites
   released dependencies' dependents (`--wetrun`), names the wave to publish
 - `src/lib/gitops_validate.task.ts` - runs all validation checks
-- `src/lib/gitops_run.task.ts` - runs a shell command in every configured repo
+- `src/lib/gitops_run.task.ts` - runs a shell command in every configured repo;
+  each result says whether its output is `truncated`, and a command past the
+  output limit is killed and fails
 - `src/lib/ci_reconcile.ts` - compares each repo's registry `ci` flag with the
   workflow files in its checkout (`missing_ci`, `stray_ci`), skipping archived
   repos; `gitops_validate`'s last step
@@ -527,8 +529,6 @@ since that changeset can't be published.
   `to_range_update_bump`), and bump type detection
 - `npm_registry.ts` - Registry waits with retry (`NpmRegistryDeps` injects npm,
   the sleep, and the clock) and `RegistryVersion`
-- `spawn_capture.ts` - Captures a program's output while keeping it in the
-  terminal's session, for what may prompt
 - `dependency_updater.ts` - One dependent's `package.json` rewrite and commit,
   with its auto-changeset when it republishes
 - `repo_readiness.ts` - The readiness predicates the step's holds and the

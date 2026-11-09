@@ -2,11 +2,14 @@ import { assert, describe, test } from 'vitest';
 import { assert_rejects } from '@fuzdev/fuz_util/testing.ts';
 import { TaskError } from '@fuzdev/gro';
 import * as s from '@fuzdev/fuz_schema/schema.ts';
+import type { FsReadDir } from '@fuzdev/gro/fs.ts';
+import type { SpawnOutOptions, SpawnOutput, SpawnProgram } from '@fuzdev/gro/spawn.ts';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import {
 	Args,
+	gitops_run_in_shell,
 	run_gitops_run,
 	type GitopsRunCommandOutput,
 	type GitopsRunDeps,
@@ -28,7 +31,8 @@ const KEYS = ['repo_a', 'repo_b', 'repo_c', 'repo_d', 'repo_e'];
 const OK: GitopsRunCommandOutput = {
 	outcome: { kind: 'exited', code: 0 },
 	stdout: 'ok\n',
-	stderr: ''
+	stderr: '',
+	truncated: false
 };
 
 /**
@@ -109,7 +113,12 @@ describe('run_gitops_run', () => {
 
 	test('a non-zero exit fails the run, reporting its code, after running the rest', async () => {
 		const deps = create_deps({
-			repo_b: { outcome: { kind: 'exited', code: 3 }, stdout: '', stderr: 'bad\n' }
+			repo_b: {
+				outcome: { kind: 'exited', code: 3 },
+				stdout: '',
+				stderr: 'bad\n',
+				truncated: false
+			}
 		});
 		const log = create_stream_log();
 		const err = await assert_rejects(() =>
@@ -136,8 +145,18 @@ describe('run_gitops_run', () => {
 
 	test('a signal or a spawn error fails with no exit code, never 0', async () => {
 		const deps = create_deps({
-			repo_a: { outcome: { kind: 'signaled', signal: 'SIGTERM' }, stdout: '', stderr: '' },
-			repo_b: { outcome: { kind: 'error', message: 'spawn sh ENOENT' }, stdout: '', stderr: '' },
+			repo_a: {
+				outcome: { kind: 'signaled', signal: 'SIGTERM' },
+				stdout: '',
+				stderr: '',
+				truncated: false
+			},
+			repo_b: {
+				outcome: { kind: 'error', message: 'spawn sh ENOENT' },
+				stdout: '',
+				stderr: '',
+				truncated: false
+			},
 			repo_c: new Error('runner threw')
 		});
 		const log = create_stream_log();
@@ -170,8 +189,13 @@ describe('run_gitops_run', () => {
 
 	test('the text format reports a signal and an exit code on stderr', async () => {
 		const deps = create_deps({
-			repo_a: { outcome: { kind: 'signaled', signal: 'SIGKILL' }, stdout: '', stderr: '' },
-			repo_b: { outcome: { kind: 'exited', code: 2 }, stdout: '', stderr: '' }
+			repo_a: {
+				outcome: { kind: 'signaled', signal: 'SIGKILL' },
+				stdout: '',
+				stderr: '',
+				truncated: false
+			},
+			repo_b: { outcome: { kind: 'exited', code: 2 }, stdout: '', stderr: '', truncated: false }
 		});
 		const log = create_stream_log();
 		await assert_rejects(() =>
@@ -206,14 +230,212 @@ describe('run_gitops_run', () => {
 				'signal',
 				'status',
 				'stderr',
-				'stdout'
+				'stdout',
+				'truncated'
 			]);
 			assert.strictEqual(repo.status, 'success');
 			assert.strictEqual(repo.exit_code, 0);
 			assert.strictEqual(repo.stdout, 'ok\n');
+			assert.strictEqual(repo.truncated, false);
 		}
 		assert.strictEqual(output.summary.success, 5);
 		// the human lines went to stderr
 		assert.ok(log.stderr.some((l) => l.includes('Running echo hi across 5 repos')));
+	});
+});
+
+describe('run_gitops_run truncated output', () => {
+	test('the JSON carries truncated, and a clean exit stays a success', async () => {
+		const deps = create_deps({ repo_a: { ...OK, truncated: true } });
+		const log = create_stream_log();
+		await run_gitops_run(
+			s.parse_or_throw(Args, { _: ['true'], config: CONFIG, format: 'json' }),
+			log,
+			deps
+		);
+		const repos = parse_json_output(log.stdout).repos;
+		const a = repos.find((r) => r.repo_name === 'repo_a')!;
+		assert.strictEqual(a.status, 'success');
+		assert.strictEqual(a.truncated, true);
+		assert.strictEqual(repos.find((r) => r.repo_name === 'repo_b')!.truncated, false);
+	});
+
+	test('the text format warns about truncated output on a success', async () => {
+		const deps = create_deps({ repo_a: { ...OK, truncated: true } });
+		const log = create_stream_log();
+		await run_gitops_run(s.parse_or_throw(Args, { _: ['true'], config: CONFIG }), log, deps);
+		assert.ok(log.stderr.some((l) => l.includes('output may be incomplete')));
+	});
+
+	test('the text format warns on a failure with no error of its own', async () => {
+		const deps = create_deps({
+			repo_a: { outcome: { kind: 'exited', code: 1 }, stdout: '', stderr: '', truncated: true }
+		});
+		const log = create_stream_log();
+		await assert_rejects(() =>
+			run_gitops_run(s.parse_or_throw(Args, { _: ['true'], config: CONFIG }), log, deps)
+		);
+		assert.ok(log.stderr.some((l) => l.includes('output may be incomplete')));
+	});
+
+	test('the text format reports the limit error alone, with no truncated warning', async () => {
+		const deps = create_deps({
+			repo_a: {
+				outcome: { kind: 'error', message: 'output limit hit' },
+				stdout: '',
+				stderr: '',
+				truncated: true
+			}
+		});
+		const log = create_stream_log();
+		await assert_rejects(() =>
+			run_gitops_run(s.parse_or_throw(Args, { _: ['true'], config: CONFIG }), log, deps)
+		);
+		assert.ok(log.stderr.some((l) => l.includes('output limit hit')));
+		assert.notOk(log.stderr.some((l) => l.includes('output may be incomplete')));
+	});
+
+	test('a runner that throws is not truncated', async () => {
+		const deps = create_deps({ repo_a: new Error('runner threw') });
+		const log = create_stream_log();
+		await assert_rejects(() =>
+			run_gitops_run(
+				s.parse_or_throw(Args, { _: ['true'], config: CONFIG, format: 'json' }),
+				log,
+				deps
+			)
+		);
+		const repos = parse_json_output(log.stdout).repos;
+		assert.strictEqual(repos.find((r) => r.repo_name === 'repo_a')!.truncated, false);
+	});
+});
+
+describe('gitops_run_in_shell', () => {
+	const fail_on_call = (): never => {
+		throw Error('unexpected spawn');
+	};
+	const CWD = {} as FsReadDir;
+	const OUTPUT = { stdout: 'out', stderr: 'err' };
+	const LIMIT = 64 * 1024 * 1024;
+
+	const create_fake_sh = (
+		output: SpawnOutput
+	): {
+		sh: SpawnProgram;
+		calls: Array<{ args: ReadonlyArray<string>; options: SpawnOutOptions | undefined }>;
+	} => {
+		const calls: Array<{ args: ReadonlyArray<string>; options: SpawnOutOptions | undefined }> = [];
+		return {
+			calls,
+			sh: {
+				name: 'sh',
+				path: '/fake/sh',
+				run: fail_on_call,
+				out_bytes: fail_on_call,
+				start: fail_on_call,
+				out: async (args, options) => {
+					calls.push({ args, options });
+					return output;
+				}
+			}
+		};
+	};
+
+	test('runs through sh in the cwd, inheriting stdin to stay in the terminal session', async () => {
+		const { sh, calls } = create_fake_sh({ kind: 'exited', code: 0, ...OUTPUT, truncated: false });
+		await gitops_run_in_shell(sh, 'npm test', CWD);
+		assert.strictEqual(calls.length, 1);
+		assert.deepEqual(calls[0]!.args, ['-c', 'npm test']);
+		assert.strictEqual(calls[0]!.options?.cwd, CWD);
+		assert.strictEqual(calls[0]!.options?.stdin, 'inherit');
+	});
+
+	test('passes an exit code through', async () => {
+		const { sh } = create_fake_sh({ kind: 'exited', code: 3, ...OUTPUT, truncated: false });
+		assert.deepEqual(await gitops_run_in_shell(sh, 'false', CWD), {
+			outcome: { kind: 'exited', code: 3 },
+			...OUTPUT,
+			truncated: false
+		});
+	});
+
+	test('a truncated SIGKILL is an explicit output limit error, keeping the output', async () => {
+		const stdout = 'x'.repeat(LIMIT);
+		const { sh } = create_fake_sh({
+			kind: 'signaled',
+			signal: 'SIGKILL',
+			stdout,
+			stderr: 'err',
+			truncated: true
+		});
+		const result = await gitops_run_in_shell(sh, 'yes', CWD);
+		assert.ok(result.outcome.kind === 'error');
+		assert.include(result.outcome.message, 'output limit');
+		assert.strictEqual(result.truncated, true);
+		assert.strictEqual(result.stdout.length, LIMIT);
+		assert.strictEqual(result.stderr, 'err');
+	});
+
+	test('the limit counts bytes on either stream, a cut character included', async () => {
+		const { sh } = create_fake_sh({
+			kind: 'signaled',
+			signal: 'SIGKILL',
+			stdout: '',
+			stderr: 'é'.repeat(LIMIT / 2),
+			truncated: true
+		});
+		const result = await gitops_run_in_shell(sh, 'yes', CWD);
+		assert.ok(result.outcome.kind === 'error');
+	});
+
+	test('a SIGKILL from elsewhere with a pipe still held stays a signal', async () => {
+		const { sh } = create_fake_sh({
+			kind: 'signaled',
+			signal: 'SIGKILL',
+			...OUTPUT,
+			truncated: true
+		});
+		const result = await gitops_run_in_shell(sh, 'daemon & kill -9 $$', CWD);
+		assert.deepEqual(result.outcome, { kind: 'signaled', signal: 'SIGKILL' });
+		assert.strictEqual(result.truncated, true);
+	});
+
+	test('passes the limit to the capture', async () => {
+		const { sh, calls } = create_fake_sh({ kind: 'exited', code: 0, ...OUTPUT, truncated: false });
+		await gitops_run_in_shell(sh, 'true', CWD);
+		assert.strictEqual(calls[0]!.options?.max_bytes, LIMIT);
+	});
+
+	test('a SIGKILL with whole output stays a signal', async () => {
+		const { sh } = create_fake_sh({
+			kind: 'signaled',
+			signal: 'SIGKILL',
+			...OUTPUT,
+			truncated: false
+		});
+		const result = await gitops_run_in_shell(sh, 'true', CWD);
+		assert.deepEqual(result.outcome, { kind: 'signaled', signal: 'SIGKILL' });
+		assert.strictEqual(result.truncated, false);
+	});
+
+	test('a truncated exit from a background child holding a pipe is reported, not an error', async () => {
+		const { sh } = create_fake_sh({ kind: 'exited', code: 0, ...OUTPUT, truncated: true });
+		assert.deepEqual(await gitops_run_in_shell(sh, 'daemon &', CWD), {
+			outcome: { kind: 'exited', code: 0 },
+			...OUTPUT,
+			truncated: true
+		});
+	});
+
+	test('a truncated run ended by another signal keeps that signal', async () => {
+		const { sh } = create_fake_sh({
+			kind: 'signaled',
+			signal: 'SIGTERM',
+			...OUTPUT,
+			truncated: true
+		});
+		const result = await gitops_run_in_shell(sh, 'true', CWD);
+		assert.deepEqual(result.outcome, { kind: 'signaled', signal: 'SIGTERM' });
+		assert.strictEqual(result.truncated, true);
 	});
 });

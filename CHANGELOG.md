@@ -1,5 +1,18 @@
 # @fuzdev/fuz_repos
 
+## 0.94.0
+
+### Minor Changes
+
+- Update dependencies (BREAKING CHANGES) ([e27a1f2](https://github.com/fuzdev/fuz_repos/commit/e27a1f2))
+  
+  Breaking dependency changes:
+  - @fuzdev/fuz_util: 0.80.0 → 0.81.0 (minor)
+  - @fuzdev/gro: 0.227.0 → 0.229.0 (minor)
+  - @fuzdev/fuz_css: 0.79.0 → 0.81.0 (minor)
+  - @fuzdev/fuz_ui: 0.226.0 → 0.227.0 (minor)
+- **breaking** feat: `local_repo_load` and `local_repos_load` with `modules: true` require a `git` program ([1d6d98a](https://github.com/fuzdev/fuz_repos/commit/1d6d98a))
+
 ## 0.93.0
 
 ### Minor Changes

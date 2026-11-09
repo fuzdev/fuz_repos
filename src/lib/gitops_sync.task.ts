@@ -8,7 +8,10 @@ import { print_path } from '@fuzdev/gro/paths.ts';
 import { load_from_env } from '@fuzdev/gro/env.ts';
 import { fs } from '@fuzdev/gro/fs.ts';
 import { create_fs_paths } from '@fuzdev/gro/fs_paths.ts';
+import { GIT_LOCAL_PASS_ENV, to_git_program } from '@fuzdev/gro/git.ts';
 import { package_json_load } from '@fuzdev/gro/package_json.ts';
+import { process } from '@fuzdev/gro/process.ts';
+import { spawn } from '@fuzdev/gro/spawn.ts';
 import { existsSync, readFileSync } from 'node:fs';
 import { styleText as st } from 'node:util';
 import type { Logger } from '@fuzdev/fuz_util/log.ts';
@@ -229,10 +232,21 @@ const fs_paths = create_fs_paths(fs);
 
 const default_gitops_sync_deps: GitopsSyncDeps = {
 	repos_ops: default_repos_operations,
-	load_repos: (options) => local_repos_load({ ...options, fs_paths }),
+	load_repos: (options) =>
+		local_repos_load({
+			...options,
+			fs_paths,
+			git: to_git_program(spawn, { pass_env: GIT_LOCAL_PASS_ENV })
+		}),
 	// searches `process.env`, the project's `.env`, then the parent directory's `.env`,
 	// which SvelteKit's env modules don't, so it doesn't use them
-	load_token: () => load_from_env(fs_paths, 'SECRET_GITHUB_API_TOKEN', ['.env', '../.env']),
+	load_token: () =>
+		load_from_env(
+			fs_paths,
+			process.env.narrow(['SECRET_GITHUB_API_TOKEN']).get_all(),
+			'SECRET_GITHUB_API_TOKEN',
+			['.env', '../.env']
+		),
 	exists: existsSync,
 	read_file: (path) => readFileSync(path, 'utf8')
 };

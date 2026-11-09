@@ -2,6 +2,8 @@ import { assert, describe, test } from 'vitest';
 import { assert_rejects } from '@fuzdev/fuz_util/testing.ts';
 import { fs } from '@fuzdev/gro/fs.ts';
 import { create_fs_paths } from '@fuzdev/gro/fs_paths.ts';
+import { GIT_LOCAL_PASS_ENV, to_git_program } from '@fuzdev/gro/git.ts';
+import { spawn } from '@fuzdev/gro/spawn.ts';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -79,7 +81,13 @@ describe('local_repo_load', () => {
 		try {
 			const local_repo_path = temp_local_repo_path(dir);
 			await assert_rejects(
-				() => local_repo_load({ local_repo_path, modules: true, fs_paths: create_fs_paths(fs) }),
+				() =>
+					local_repo_load({
+						local_repo_path,
+						modules: true,
+						fs_paths: create_fs_paths(fs),
+						git: to_git_program(spawn, { pass_env: GIT_LOCAL_PASS_ENV })
+					}),
 				/Failed to load library metadata/
 			);
 			await assert_rejects(

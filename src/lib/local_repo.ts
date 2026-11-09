@@ -10,6 +10,7 @@ import { join } from 'node:path';
 import { TaskError } from '@fuzdev/gro';
 import { library_load_from_repo } from '@fuzdev/gro/library_load.ts';
 import type { FsPaths } from '@fuzdev/gro/fs_paths.ts';
+import type { SpawnProgram } from '@fuzdev/gro/spawn.ts';
 import type { Logger } from '@fuzdev/fuz_util/log.ts';
 import { map_concurrent_settled } from '@fuzdev/fuz_util/async.ts';
 
@@ -148,6 +149,8 @@ export type LocalRepoLoadOptions = {
 			modules: true;
 			/** Reads each repo's files and writes the analysis cache, from the task's root. */
 			fs_paths: FsPaths;
+			/** Reads each repo's commit and status for the analysis cache, built at the task's root. */
+			git: SpawnProgram;
 	  }
 	| {
 			/**
@@ -189,7 +192,9 @@ export const local_repo_load = async (
 	let package_json: PackageJson;
 	try {
 		({ library_json, package_json } = options.modules
-			? await library_load_from_repo(options.fs_paths, repo_dir, { log })
+			? await library_load_from_repo({ fs_paths: options.fs_paths, git: options.git }, repo_dir, {
+					log
+				})
 			: await library_load_manifest(repo_dir));
 	} catch (err) {
 		throw new TaskError(

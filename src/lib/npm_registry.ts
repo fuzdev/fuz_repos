@@ -1,6 +1,4 @@
 import type { Logger } from '@fuzdev/fuz_util/log.ts';
-import { spawn_out } from '@fuzdev/fuz_util/process.ts';
-import { wait } from '@fuzdev/fuz_util/async.ts';
 import { styleText as st } from 'node:util';
 
 /**
@@ -34,12 +32,6 @@ export interface NpmRegistryDeps {
 	now: () => number;
 }
 
-export const default_npm_registry_deps: NpmRegistryDeps = {
-	run_npm: async (args) => (await spawn_out('npm', args)).stdout ?? '',
-	wait,
-	now: () => Date.now()
-};
-
 /**
  * Checks whether `pkg@version` is on the npm registry, by `npm view`.
  *
@@ -49,8 +41,8 @@ export const default_npm_registry_deps: NpmRegistryDeps = {
 export const check_package_available = async (
 	pkg: string,
 	version: string,
-	options: { log?: Logger } = {},
-	deps: NpmRegistryDeps = default_npm_registry_deps
+	options: { log?: Logger },
+	deps: NpmRegistryDeps
 ): Promise<boolean> => {
 	const { log } = options;
 	try {
@@ -80,8 +72,8 @@ export const check_package_available = async (
 export const wait_for_package = async (
 	pkg: string,
 	version: string,
-	options: WaitOptions = {},
-	deps: NpmRegistryDeps = default_npm_registry_deps
+	options: WaitOptions,
+	deps: NpmRegistryDeps
 ): Promise<void> => {
 	const {
 		log,

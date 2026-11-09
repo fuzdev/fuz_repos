@@ -7,12 +7,17 @@
  * @module
  */
 
-import { spawn_out, spawn_result_to_message } from '@fuzdev/fuz_util/process.ts';
+import { spawn_result_is_ok, to_spawn_result_message } from '@fuzdev/gro/cli.ts';
+import { fs } from '@fuzdev/gro/fs.ts';
+import { to_git_program } from '@fuzdev/gro/git.ts';
+import { spawn, type SpawnCallOptions, type SpawnProgram } from '@fuzdev/gro/spawn.ts';
 import { readFile, writeFile, mkdir, stat } from 'node:fs/promises';
+import { resolve } from 'node:path';
+import { wait } from '@fuzdev/fuz_util/async.ts';
 import { to_error_message } from '@fuzdev/fuz_util/error.ts';
 
 import { has_changesets, read_changesets, predict_next_version } from './changeset_reader.ts';
-import { wait_for_package } from './npm_registry.ts';
+import { wait_for_package, type NpmRegistryDeps } from './npm_registry.ts';
 import { git_add, git_commit } from './git_operations.ts';
 import type {
 	ChangesetOperations,
@@ -72,15 +77,26 @@ export const default_changeset_operations: ChangesetOperations = {
 	}
 };
 
+/**
+ * `git` for the release's commits. `pass_env: 'all'` because commit hooks, signing, and
+ * clean filters are the user's setup, not a closed set of variables.
+ */
+const to_release_git = (): SpawnProgram => to_git_program(spawn, { pass_env: 'all' });
+
+const to_call_options = async (cwd: string | undefined): Promise<SpawnCallOptions | undefined> =>
+	cwd ? { cwd: await fs.open_dir(resolve(cwd)) } : undefined;
+
 export const default_git_operations: GitOperations = {
 	add: async (options) => {
 		const { files, cwd } = options;
-		return wrap_void(() => git_add(files, cwd ? { cwd } : undefined));
+		return wrap_void(async () => git_add(to_release_git(), files, await to_call_options(cwd)));
 	},
 
 	commit: async (options) => {
 		const { message, files, cwd } = options;
-		return wrap_void(() => git_commit(message, files, cwd ? { cwd } : undefined));
+		return wrap_void(async () =>
+			git_commit(to_release_git(), message, files, await to_call_options(cwd))
+		);
 	}
 };
 
@@ -91,64 +107,82 @@ export const default_repos_operations: ReposOperations = {
 		if (fetch) args.push('--fetch');
 		// `--` so a key can never read as a flag
 		args.push('--json', '--', ...keys);
-		const spawned = await spawn_out('repos', args);
-		const { result } = spawned;
-		if (result.kind === 'error') {
-			const not_found = (result.error as NodeJS.ErrnoException).code === 'ENOENT';
-			return {
-				ok: false,
-				kind: not_found ? 'not_found' : 'failed',
-				message: result.error.message
-			};
-		}
-		if (result.kind === 'signaled') {
-			return { ok: false, kind: 'failed', message: `repos was killed by ${result.signal}` };
-		}
-		return {
-			ok: true,
-			output: {
-				stdout: spawned.stdout ?? '',
-				stderr: spawned.stderr ?? '',
-				exit_code: result.code
+		try {
+			// `pass_env: 'all'` because `repos` runs git against the remotes (ssh agent, credential
+			// helpers) and reads the session environment; `repos` fetches non-interactively, so
+			// `out`'s new session costs nothing
+			const repos = spawn.find('repos', { pass_env: 'all' });
+			if (!repos) return { ok: false, kind: 'not_found', message: 'repos not found on PATH' };
+			const output = await repos.out(args);
+			if (output.kind === 'signaled') {
+				return { ok: false, kind: 'failed', message: `repos was killed by ${output.signal}` };
 			}
-		};
+			if (output.kind !== 'exited') {
+				return { ok: false, kind: 'failed', message: to_spawn_result_message(output) };
+			}
+			return {
+				ok: true,
+				output: { stdout: output.stdout, stderr: output.stderr, exit_code: output.code }
+			};
+		} catch (error) {
+			return { ok: false, kind: 'failed', message: to_error_message(error) };
+		}
 	}
 };
 
-export const default_npm_operations: NpmOperations = {
-	view_version: async (options) => {
-		const { pkg, version } = options;
-		try {
-			const spawned = await spawn_out('npm', ['view', `${pkg}@${version}`, 'version']);
-			if (spawned.result.ok) {
-				// an existing package without the version prints nothing
-				const listed = (spawned.stdout ?? '').trim() === version;
-				return { ok: true, value: listed ? 'listed' : 'unlisted' };
+/**
+ * The npm operations over a `npm` program, resolved each time one runs.
+ *
+ * @param to_npm - makes the `npm` handle, called per operation so a missing `npm`
+ * reports as a failed operation rather than at import
+ */
+export const create_npm_operations = (to_npm: () => SpawnProgram): NpmOperations => {
+	const registry_deps: NpmRegistryDeps = {
+		run_npm: async (args) => (await to_npm().out(args)).stdout,
+		wait,
+		now: () => Date.now()
+	};
+	return {
+		view_version: async (options) => {
+			const { pkg, version } = options;
+			try {
+				const spawned = await to_npm().out(['view', `${pkg}@${version}`, 'version']);
+				if (spawn_result_is_ok(spawned)) {
+					// an existing package without the version prints nothing
+					const listed = spawned.stdout.trim() === version;
+					return { ok: true, value: listed ? 'listed' : 'unlisted' };
+				}
+				// a package the registry doesn't know was never published
+				if (spawned.stderr.includes('E404')) return { ok: true, value: 'unknown' };
+				const stderr = spawned.stderr.trim();
+				return {
+					ok: false,
+					message:
+						`\`npm view ${pkg}@${version}\` failed (${to_spawn_result_message(spawned)})` +
+						(stderr ? `: ${stderr.split('\n', 1)[0]}` : '')
+				};
+			} catch (error) {
+				return { ok: false, message: String(error) };
 			}
-			// a package the registry doesn't know was never published
-			if (spawned.stderr?.includes('E404')) return { ok: true, value: 'unknown' };
-			const stderr = spawned.stderr?.trim();
-			return {
-				ok: false,
-				message:
-					`\`npm view ${pkg}@${version}\` failed (${spawn_result_to_message(spawned.result)})` +
-					(stderr ? `: ${stderr.split('\n', 1)[0]}` : '')
-			};
-		} catch (error) {
-			return { ok: false, message: String(error) };
-		}
-	},
+		},
 
-	wait_for_package: async (options) => {
-		const { pkg, version, wait_options, log } = options;
-		try {
-			await wait_for_package(pkg, version, { ...wait_options, log });
-			return { ok: true };
-		} catch (error) {
-			return { ok: false, message: String(error) };
+		wait_for_package: async (options) => {
+			const { pkg, version, wait_options, log } = options;
+			try {
+				await wait_for_package(pkg, version, { ...wait_options, log }, registry_deps);
+				return { ok: true };
+			} catch (error) {
+				return { ok: false, message: String(error) };
+			}
 		}
-	}
+	};
 };
+
+// `pass_env: 'all'` because `~/.npmrc` interpolates whatever `${VAR}` the user wrote and
+// a variable it names being unset is a config error, and proxies and CA bundles are env too
+export const default_npm_operations: NpmOperations = create_npm_operations(() =>
+	spawn.program('npm', { pass_env: 'all' })
+);
 
 /**
  * Classifies a thrown filesystem error by its Node `code`. Unknown codes and

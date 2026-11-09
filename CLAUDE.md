@@ -527,6 +527,8 @@ since that changeset can't be published.
   `to_range_update_bump`), and bump type detection
 - `npm_registry.ts` - Registry waits with retry (`NpmRegistryDeps` injects npm,
   the sleep, and the clock) and `RegistryVersion`
+- `spawn_capture.ts` - Captures a program's output while keeping it in the
+  terminal's session, for what may prompt
 - `dependency_updater.ts` - One dependent's `package.json` rewrite and commit,
   with its auto-changeset when it republishes
 - `repo_readiness.ts` - The readiness predicates the step's holds and the
@@ -786,9 +788,9 @@ mock factories.
 
 Uses vitest with **no mocking libraries** in the domain tests — they inject
 plain-object operations (see above), and `npm_registry.test.ts` drives the
-npm wait through `NpmRegistryDeps` with a fake registry and clock. The one
-exception is `operations_defaults.test.ts`, which tests the real
-implementations themselves: it stubs `spawn_out` for `npm view`.
+npm wait through `NpmRegistryDeps` with a fake registry and clock.
+`operations_defaults.test.ts` tests the real `npm view` handling through
+`create_npm_operations` over a plain-object `npm` program.
 
 ```bash
 gro test                         # run all tests

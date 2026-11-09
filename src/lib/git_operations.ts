@@ -1,18 +1,22 @@
-import { spawn_out, spawn_result_to_message } from '@fuzdev/fuz_util/process.ts';
-import type { SpawnOptions } from 'node:child_process';
+import { to_spawn_result_message, spawn_result_is_ok } from '@fuzdev/gro/cli.ts';
+import type { SpawnCallOptions, SpawnProgram } from '@fuzdev/gro/spawn.ts';
+
+import { spawn_capture } from './spawn_capture.ts';
 
 /**
  * Adds files to git staging area and throws if anything goes wrong.
  */
 export const git_add = async (
+	git: SpawnProgram,
 	files: string | Array<string>,
-	options?: SpawnOptions
+	options?: SpawnCallOptions
 ): Promise<void> => {
 	const file_list = Array.isArray(files) ? files : [files];
-	const { result, stderr } = await spawn_out('git', ['add', ...file_list], options);
-	if (!result.ok) {
+	const output = await spawn_capture(git, ['add', ...file_list], options);
+	if (!spawn_result_is_ok(output)) {
+		const { stderr } = output;
 		throw Error(
-			`git_add failed with ${spawn_result_to_message(result)}${stderr ? ': ' + stderr.trim() : ''}`
+			`git_add failed with ${to_spawn_result_message(output)}${stderr ? ': ' + stderr.trim() : ''}`
 		);
 	}
 };
@@ -23,21 +27,19 @@ export const git_add = async (
  * an empty list would commit the whole index.
  */
 export const git_commit = async (
+	git: SpawnProgram,
 	message: string,
 	files: Array<string>,
-	options?: SpawnOptions
+	options?: SpawnCallOptions
 ): Promise<void> => {
 	if (files.length === 0) {
 		throw Error('git_commit needs at least one file: an empty list would commit the whole index');
 	}
-	const { result, stderr } = await spawn_out(
-		'git',
-		['commit', '-m', message, '--', ...files],
-		options
-	);
-	if (!result.ok) {
+	const output = await spawn_capture(git, ['commit', '-m', message, '--', ...files], options);
+	if (!spawn_result_is_ok(output)) {
+		const { stderr } = output;
 		throw Error(
-			`git_commit failed with ${spawn_result_to_message(result)}${stderr ? ': ' + stderr.trim() : ''}`
+			`git_commit failed with ${to_spawn_result_message(output)}${stderr ? ': ' + stderr.trim() : ''}`
 		);
 	}
 };

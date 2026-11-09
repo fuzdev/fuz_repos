@@ -3,9 +3,12 @@ import type { Logger } from '@fuzdev/fuz_util/log.ts';
 import * as s from '@fuzdev/fuz_schema/schema.ts';
 import { meta } from '@fuzdev/fuz_schema/meta.ts';
 import { map_concurrent_settled } from '@fuzdev/fuz_util/async.ts';
-import { spawn_out } from '@fuzdev/fuz_util/process.ts';
 import { to_error_message } from '@fuzdev/fuz_util/error.ts';
+import { to_spawn_result_message } from '@fuzdev/gro/cli.ts';
+import { fs } from '@fuzdev/gro/fs.ts';
+import { spawn } from '@fuzdev/gro/spawn.ts';
 import { writeFile } from 'node:fs/promises';
+import { resolve } from 'node:path';
 import { styleText as st } from 'node:util';
 
 import { resolve_gitops_repos } from './gitops_task_helpers.ts';
@@ -13,6 +16,7 @@ import { GITOPS_CONCURRENCY_DEFAULT, GITOPS_CONFIG_PATH_DEFAULT } from './gitops
 import type { ReposOperations } from './operations.ts';
 import { default_repos_operations } from './operations_defaults.ts';
 import { output_is_machine, route_human_output } from './output_helpers.ts';
+import { spawn_capture } from './spawn_capture.ts';
 
 /** @nodocs */
 export const Args = s.object({
@@ -108,15 +112,27 @@ export interface GitopsRunDeps {
 const default_gitops_run_deps: GitopsRunDeps = {
 	repos_ops: default_repos_operations,
 	run_command: async ({ command, cwd }) => {
-		// through a shell, so pipes, redirects, and globs work
-		const { result, stdout, stderr } = await spawn_out('sh', ['-c', command], { cwd });
-		const outcome: GitopsRunOutcome =
-			result.kind === 'exited'
-				? { kind: 'exited', code: result.code }
-				: result.kind === 'signaled'
-					? { kind: 'signaled', signal: result.signal }
-					: { kind: 'error', message: to_error_message(result.error) };
-		return { outcome, stdout: stdout ?? '', stderr: stderr ?? '' };
+		try {
+			// through a shell, so pipes, redirects, and globs work; the command is the user's,
+			// so it gets their whole environment and stays in the terminal's session
+			const sh = spawn.program('sh', { pass_env: 'all' });
+			const output = await spawn_capture(sh, ['-c', command], {
+				cwd: await fs.open_dir(resolve(cwd))
+			});
+			const outcome: GitopsRunOutcome =
+				output.kind === 'exited'
+					? { kind: 'exited', code: output.code }
+					: output.kind === 'signaled'
+						? { kind: 'signaled', signal: output.signal }
+						: { kind: 'error', message: to_spawn_result_message(output) };
+			return { outcome, stdout: output.stdout, stderr: output.stderr };
+		} catch (error) {
+			return {
+				outcome: { kind: 'error', message: to_error_message(error) },
+				stdout: '',
+				stderr: ''
+			};
+		}
 	}
 };
 

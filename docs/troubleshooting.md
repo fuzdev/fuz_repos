@@ -205,12 +205,12 @@ case:
   commit itself), the tree is dirty with the consumed changesets deleted.
   Undo it with `git reset --hard` and publish again: committing would drop the
   changesets, so the retry would have nothing to publish.
-- **At the build or `changeset publish`**, the tree is clean with a local
-  `publish vX.Y.Z` commit. Undo it with `git reset --hard HEAD~1`, which
-  restores the changesets, and publish again. After a failed `changeset
-  publish` you can instead finish with `changeset publish && git push
-  --follow-tags`. Resolve this before `repos sync`, which pushes what's ahead
-  and would put the release commit on origin before its version is on npm.
+- **At the build or `changeset publish`**, the tree is clean with a
+  `publish vX.Y.Z` commit and no tag. Fix the failure and run `gro publish`
+  again, which resumes from that commit, or undo it with `git reset --hard
+  HEAD~1`, which restores the changesets. `repos sync` pushes that commit if
+  it runs first, leaving origin ahead of npm until the resumed publish
+  finishes, so undoing is only for a commit still local.
 
 The step reports dirt without knowing which case it is — check `git status`
 before choosing.
@@ -283,9 +283,8 @@ and no state to go stale:
 3. A step that ran early, a release made by hand, or a wave whose step never
    ran all come out the same: the dependents' ranges still trail the released
    version, so the step rewrites them
-4. A failed `gro publish` leaves a dirty tree or a local release commit
-   ([above](#after-a-failed-gro-publish)); undo it and publish that package
-   again
+4. A failed `gro publish` leaves a dirty tree to undo or a release commit to
+   resume ([above](#after-a-failed-gro-publish)); publish that package again
 
 ## Debugging Tips
 

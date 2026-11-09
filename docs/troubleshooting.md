@@ -57,7 +57,7 @@ repo to get there; each line names what's wrong and the fix:
   there is committed or stashed
 - **uncommitted changes (… staged, … unstaged, … untracked, … conflicted)** —
   commit, stash, or discard them; untracked files count. After a failed
-  `gro publish`, see [Uncommitted changes after a failed `changeset publish`](#uncommitted-changes-after-a-failed-changeset-publish)
+  `gro publish`, see [After a failed `gro publish`](#after-a-failed-gro-publish)
   before committing
 - **a rebase is in progress** (or merge, cherry-pick, …) — finish or abort it
 - **`main` is N commits behind origin** — `repos sync <key>` fast-forwards it
@@ -139,8 +139,7 @@ by default).
 
 If it never shows, the version wasn't published: `gro publish` bumped it but
 failed before or during `changeset publish`. Check that repo's `git status`
-(see [below](#uncommitted-changes-after-a-failed-changeset-publish)) and run
-`gro publish` there again.
+and `git log`, and recover it as [below](#after-a-failed-gro-publish).
 
 ### "never published, with nothing to publish"
 
@@ -188,23 +187,33 @@ npm whoami  # verify login
 
 ### A release commit and tag left local (the push was rejected)
 
-`gro publish` doesn't check its own `git push`. If origin moved after it
-pulled, git rejects the push, but `gro publish` still succeeds: the version is
-on npm. Git's rejection in the output is the only sign. The release commit and
-its `vX.Y.Z` tag stay local, on a branch now diverged from origin, and the
-next step holds the repo. Merge origin's branch in (a rebase would leave the
+If origin moved after `gro publish` pulled, git rejects the push and the task
+fails, with the version already on npm. The release commit and its `vX.Y.Z` tag
+stay local, on a branch now diverged from origin, and the next step holds the
+repo. Merge origin's branch in (a rebase would leave the
 tag on a commit the branch no longer holds — which is why `repos sync` and
 `repos push` leave a diverged branch with a tag on its local commits to a
 person), push the branch with `repos push`, and push the tag by hand, since
 `repos` never pushes tags.
 
-### Uncommitted changes after a failed `changeset publish`
+### After a failed `gro publish`
 
-A `gro publish` that fails partway through `changeset version` or `changeset
-publish` can leave the tree dirty with the consumed changesets deleted. gro's
-own advice there is `git reset --hard`: committing would drop the changesets,
-so the retry would have nothing to publish. The step reports the dirt without
-knowing which case it is — check `git status` before choosing.
+Where it stopped decides what it leaves, and nothing has reached npm in either
+case:
+
+- **Before the release commit** (`changeset version`, the install, gen, or the
+  commit itself), the tree is dirty with the consumed changesets deleted.
+  Undo it with `git reset --hard` and publish again: committing would drop the
+  changesets, so the retry would have nothing to publish.
+- **At the build or `changeset publish`**, the tree is clean with a local
+  `publish vX.Y.Z` commit. Undo it with `git reset --hard HEAD~1`, which
+  restores the changesets, and publish again. After a failed `changeset
+  publish` you can instead finish with `changeset publish && git push
+  --follow-tags`. Resolve this before `repos sync`, which pushes what's ahead
+  and would put the release commit on origin before its version is on npm.
+
+The step reports dirt without knowing which case it is — check `git status`
+before choosing.
 
 ### "Production dependency cycle: a → b"
 
@@ -274,8 +283,9 @@ and no state to go stale:
 3. A step that ran early, a release made by hand, or a wave whose step never
    ran all come out the same: the dependents' ranges still trail the released
    version, so the step rewrites them
-4. A failed `gro publish` leaves its changesets (or a dirty tree, above); fix
-   it and publish that package again
+4. A failed `gro publish` leaves a dirty tree or a local release commit
+   ([above](#after-a-failed-gro-publish)); undo it and publish that package
+   again
 
 ## Debugging Tips
 

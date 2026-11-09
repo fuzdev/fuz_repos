@@ -468,8 +468,9 @@ private or never-published leaf) keeps them unpushed until `repos sync` or
 The step prints plain `gro publish` (naming `--branch` when the entry follows
 a branch other than `main`): gro checks out the branch, pulls, installs
 (healing npm's stale-cache ETARGET when a just-released version isn't visible
-yet), runs `gro check` against the rewritten ranges, builds, runs `changeset
-publish` (npm's 2FA prompt), and pushes the release commit and tag — with the
+yet), runs `gro check` against the rewritten ranges, commits the release,
+builds, runs `changeset publish` (npm's 2FA prompt, and the tag), and pushes
+the commit and tag — with the
 step's rewrite commits under it. fuz_repos installs, builds, and publishes
 nothing itself.
 

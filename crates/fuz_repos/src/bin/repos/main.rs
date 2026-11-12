@@ -229,6 +229,10 @@ struct PushArgs {
     /// push a branch held only for the Git LFS pointers it would send
     /// (repos runs no hook, so Git LFS's own upload never runs): say so
     /// once git lfs push origin <branch> has uploaded their objects
+    #[expect(
+        rustdoc::invalid_html_tags,
+        reason = "argh prints this doc verbatim as --help text, where <branch> is a placeholder"
+    )]
     #[argh(switch)]
     lfs_uploaded: bool,
     /// print the report as JSON

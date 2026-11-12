@@ -85,6 +85,14 @@ jobs:
       - name: Clippy
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
+      # rustdoc lints fire only under `cargo doc`, which checks only the docs it
+      # renders: `--document-private-items` covers private items' comments, and
+      # `--all-features` the whole doc surface.
+      - name: Rustdoc
+        env:
+          RUSTDOCFLAGS: -D warnings
+        run: cargo doc --workspace --no-deps --all-features --document-private-items --locked
+
       # --no-fail-fast: report every failing test binary, not just the first.
       - name: Test
         run: cargo test --workspace --locked --no-fail-fast

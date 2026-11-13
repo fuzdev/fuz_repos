@@ -9,9 +9,6 @@
 //! exact refs, HEAD, and working tree it should leave, and by what reached
 //! a remote (the fixture's `https` and `ssh` logs).
 
-// helpers outside `#[test]` fns fail the test the way an assertion would
-#![allow(clippy::unwrap_used, clippy::panic)]
-
 mod support;
 
 use std::collections::BTreeMap;

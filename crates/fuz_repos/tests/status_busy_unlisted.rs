@@ -1,8 +1,10 @@
 //! Sessions working in git dirs git does not list: hand-made, partly linked,
 //! and new-workdir git dirs.
 
-// helpers outside `#[test]` fns fail the test the way an assertion would
-#![allow(clippy::unwrap_used)]
+#![expect(
+    clippy::unwrap_used,
+    reason = "test helpers outside `#[test]` fns panic on a failed setup or check"
+)]
 
 mod support;
 

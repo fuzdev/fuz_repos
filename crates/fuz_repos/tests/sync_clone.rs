@@ -4,8 +4,11 @@
 //! gets cloned over, what holds a clone, and failures that leave nothing at
 //! the entry's path.
 
-// helpers outside `#[test]` fns fail the test the way an assertion would
-#![allow(clippy::unwrap_used, clippy::panic)]
+#![expect(
+    clippy::unwrap_used,
+    clippy::panic,
+    reason = "test helpers outside `#[test]` fns panic on a failed setup or check"
+)]
 
 mod support;
 

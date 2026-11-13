@@ -1,8 +1,10 @@
 //! Attributing a session to the worktree or checkout its cwd reaches through
 //! moved, copied, and hand-written git files.
 
-// helpers outside `#[test]` fns fail the test the way an assertion would
-#![allow(clippy::unwrap_used)]
+#![expect(
+    clippy::unwrap_used,
+    reason = "test helpers outside `#[test]` fns panic on a failed setup or check"
+)]
 
 mod support;
 

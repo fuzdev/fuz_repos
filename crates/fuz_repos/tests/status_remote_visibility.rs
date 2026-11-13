@@ -1,8 +1,10 @@
 //! The visibility check's anonymous read, against `file://` repos and a local
 //! HTTP server that demands credentials. Nothing leaves the machine.
 
-// helpers outside `#[test]` fns fail the test the way an assertion would
-#![allow(clippy::unwrap_used)]
+#![expect(
+    clippy::unwrap_used,
+    reason = "test helpers outside `#[test]` fns panic on a failed setup or check"
+)]
 
 mod support;
 

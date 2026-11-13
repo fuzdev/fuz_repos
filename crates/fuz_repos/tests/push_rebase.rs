@@ -10,8 +10,10 @@
 //! The fixtures and what a run must leave are `support::rebase`'s, shared
 //! with the `sync_rebase` tests.
 
-// helpers outside `#[test]` fns fail the test the way an assertion would
-#![allow(clippy::unwrap_used, clippy::panic)]
+#![expect(
+    clippy::unwrap_used,
+    reason = "test helpers outside `#[test]` fns panic on a failed setup or check"
+)]
 
 mod support;
 

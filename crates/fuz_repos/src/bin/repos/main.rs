@@ -114,8 +114,10 @@ enum Command {
 }
 
 /// Report every entry's git state from local refs, grouped by what to do next.
-// A flat bundle of CLI switches, not domain state.
-#[allow(clippy::struct_excessive_bools)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "a flat bundle of CLI switches, not domain state"
+)]
 #[derive(FromArgs, Debug)]
 #[argh(subcommand, name = "status")]
 struct StatusArgs {
@@ -163,8 +165,10 @@ struct StatusArgs {
 /// conflict, or deletes. Third-party references are left as they are
 /// unless named or under --references; pins, and references whose origin
 /// isn't the registry's repo, always are.
-// A flat bundle of CLI switches, not domain state.
-#[allow(clippy::struct_excessive_bools)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "a flat bundle of CLI switches, not domain state"
+)]
 #[derive(FromArgs, Debug)]
 #[argh(subcommand, name = "sync")]
 struct SyncArgs {
@@ -209,8 +213,10 @@ struct SyncArgs {
 /// upstream, a remote branch in the way, a failed fetch or push), 2 for
 /// usage (an unknown target, the cwd in no entry's checkout, a third-party
 /// or pinned target, --new-branch in an agent's shell).
-// A flat bundle of CLI switches, not domain state.
-#[allow(clippy::struct_excessive_bools)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "a flat bundle of CLI switches, not domain state"
+)]
 #[derive(FromArgs, Debug)]
 #[argh(subcommand, name = "push")]
 struct PushArgs {

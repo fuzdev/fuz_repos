@@ -768,8 +768,10 @@ fn relation(b: &BranchFacts, facts: &RepoFacts) -> Relation {
 /// Every checkout a branch is on, folded: git allows one branch on HEAD in
 /// several (`worktree add -f`, `checkout --ignore-other-worktrees`), and any
 /// one of them busy, dirty, or unknown holds it.
-// Independent facts folded over the checkouts, not a hidden state machine.
-#[allow(clippy::struct_excessive_bools)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "separate facts folded over the checkouts, not a hidden state machine"
+)]
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 struct CheckoutsOn<'a> {
     /// On HEAD in some checkout — or possibly, in one whose HEAD is unknown.
@@ -800,8 +802,10 @@ struct CheckoutsOn<'a> {
 }
 
 /// What may hold a branch's action back.
-// Independent facts, each holding some actions, not a hidden state machine.
-#[allow(clippy::struct_excessive_bools)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "independent facts, each holding some actions, not a hidden state machine"
+)]
 #[derive(Debug, Clone, Copy)]
 struct Holds<'a, 'b> {
     /// The entry is pinned.

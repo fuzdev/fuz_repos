@@ -7,9 +7,6 @@
 //! live-sessions reader is the seam for what happens between classifying and
 //! pushing: its second call is the one right before the push.
 
-// helpers outside `#[test]` fns fail the test the way an assertion would
-#![allow(clippy::unwrap_used)]
-
 mod support;
 
 use std::ffi::OsString;

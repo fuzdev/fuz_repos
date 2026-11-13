@@ -8,9 +8,6 @@
 //! that changes the fixture on a later call stands for whatever happens
 //! between classifying and acting.
 
-// helpers outside `#[test]` fns fail the test the way an assertion would
-#![allow(clippy::unwrap_used, clippy::panic)]
-
 mod support;
 
 use std::collections::BTreeMap;

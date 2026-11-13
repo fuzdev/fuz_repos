@@ -8,9 +8,6 @@
 //! first call classifies, its second is the one right before the rebase,
 //! its third the one right before the push that follows.
 
-// helpers outside `#[test]` fns fail the test the way an assertion would
-#![allow(clippy::unwrap_used, clippy::panic)]
-
 mod support;
 
 use fuz_repos::report::{BranchSyncHold, PushOutcome, RebasePush};

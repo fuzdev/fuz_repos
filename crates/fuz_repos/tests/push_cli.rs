@@ -1,8 +1,10 @@
 //! `repos push` through the binary: exit codes, the outcome document, and usage
 //! errors. Run under the same hermetic environment as the fixtures.
 
-// helpers outside `#[test]` fns fail the test the way an assertion would
-#![allow(clippy::unwrap_used)]
+#![expect(
+    clippy::unwrap_used,
+    reason = "test helpers outside `#[test]` fns panic on a failed setup or check"
+)]
 
 mod support;
 

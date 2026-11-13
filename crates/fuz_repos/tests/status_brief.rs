@@ -3,8 +3,10 @@
 //! session should know, one line otherwise, local only, and never a
 //! failure its hook would see — only a usage error exits non-zero.
 
-// helpers outside `#[test]` fns fail the test the way an assertion would
-#![allow(clippy::unwrap_used)]
+#![expect(
+    clippy::unwrap_used,
+    reason = "test helpers outside `#[test]` fns panic on a failed setup or check"
+)]
 
 mod support;
 

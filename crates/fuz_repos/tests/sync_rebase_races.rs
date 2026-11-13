@@ -10,9 +10,6 @@
 //! one right before the push that follows (`reader_then`,
 //! `arriving_after`).
 
-// helpers outside `#[test]` fns fail the test the way an assertion would
-#![allow(clippy::unwrap_used, clippy::panic)]
-
 mod support;
 
 use fuz_repos::report::{BranchOutcome, BranchSyncHold, RebasePush};

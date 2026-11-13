@@ -11,9 +11,6 @@
 //! The fixtures and what a run must leave are `support::rebase`'s, shared
 //! with those files and the `push_rebase*` tests.
 
-// helpers outside `#[test]` fns fail the test the way an assertion would
-#![allow(clippy::unwrap_used, clippy::panic)]
-
 mod support;
 
 use fuz_repos::classify::NeedsHuman;

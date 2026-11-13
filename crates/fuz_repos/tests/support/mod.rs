@@ -49,11 +49,15 @@
 //! session, unless a test builds a `ClaudeDir` — session files naming real
 //! live pids, its own `LiveChild` processes — and points the tool at it.
 
-// each test binary uses a subset of the helpers
-#![allow(dead_code)]
-// test support: a setup that can't build its fixture fails the test, as an
-// assertion would
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+// `allow`, not `expect`: this module is compiled into every test binary, and
+// which helpers go unused differs from one binary to the next.
+#![allow(dead_code, reason = "each test binary uses only part of this module")]
+#![expect(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    reason = "test helpers outside `#[test]` fns panic on a failed setup or check"
+)]
 
 pub mod busy;
 pub mod cli;

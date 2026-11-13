@@ -2,8 +2,10 @@
 //! unlisted and copied git dirs, which git dirs count as the primary rather
 //! than a worktree, and the holds they put on the entry.
 
-// helpers outside `#[test]` fns fail the test the way an assertion would
-#![allow(clippy::unwrap_used)]
+#![expect(
+    clippy::unwrap_used,
+    reason = "test helpers outside `#[test]` fns panic on a failed setup or check"
+)]
 
 mod support;
 

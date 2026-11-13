@@ -23,8 +23,11 @@
 //! floor counts that list: a new variant fails to compile until it's
 //! listed, and fails the floor until a golden covers it.
 
-// helpers outside `#[test]` fns fail the test the way an assertion would
-#![allow(clippy::unwrap_used, clippy::panic)]
+#![expect(
+    clippy::unwrap_used,
+    clippy::panic,
+    reason = "test helpers outside `#[test]` fns panic on a failed setup or check"
+)]
 
 #[path = "golden/coverage.rs"]
 mod coverage;

@@ -202,8 +202,10 @@ pub enum UnregisteredKind {
 }
 
 /// One registry entry's state.
-// Independent declared facts, not a hidden state machine.
-#[allow(clippy::struct_excessive_bools)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "the entry's independent facts, carried into the report, not a hidden state machine"
+)]
 #[derive(Debug, Clone, Serialize)]
 pub struct EntryStatus {
     pub key: String,

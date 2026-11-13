@@ -267,8 +267,10 @@ pub enum EntryKind {
 /// plain name, safe to join to the root) and `writable` was derived from
 /// the owners. Its fields stay public: a caller that edits one owns what
 /// it wrote.
-// Independent declared facts, not a hidden state machine.
-#[allow(clippy::struct_excessive_bools)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "independent per-entry facts, declared or derived, not a hidden state machine"
+)]
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct Entry {

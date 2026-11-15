@@ -5,12 +5,12 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { format_file } from '@fuzdev/gro/format_file.ts';
 import { basename, join, resolve } from 'node:path';
 import { print_path } from '@fuzdev/gro/paths.ts';
-import { load_from_env } from '@fuzdev/gro/env.ts';
+import { load_from_env } from '@fuzdev/gro/env_files.ts';
 import { fs } from '@fuzdev/gro/fs.ts';
 import { create_fs_paths } from '@fuzdev/gro/fs_paths.ts';
 import { GIT_LOCAL_PASS_ENV, to_git_program } from '@fuzdev/gro/git.ts';
 import { package_json_load } from '@fuzdev/gro/package_json.ts';
-import { process } from '@fuzdev/gro/process.ts';
+import { env } from '@fuzdev/gro/env.ts';
 import { spawn } from '@fuzdev/gro/spawn.ts';
 import { existsSync, readFileSync } from 'node:fs';
 import { styleText as st } from 'node:util';
@@ -85,7 +85,7 @@ export const task: Task<Args> = {
 	Args,
 	summary: 'generates UI data from repo metadata, reading each repo as it sits',
 	run: async (ctx) => {
-		const { args, log, invoke_task } = ctx;
+		const { task_args, log, invoke_task } = ctx;
 		// `ctx.svelte_config` is a lazy getter, so it's only read when `outdir` isn't provided
 		const {
 			config,
@@ -93,7 +93,7 @@ export const task: Task<Args> = {
 			outdir = (await ctx.svelte_config).routes_path,
 			check,
 			allow_dirty
-		} = args;
+		} = task_args;
 
 		// The generated `repos.json` is the host project's site data, so a public host
 		// must never carry a private repo's metadata: `host` refuses the private repos
@@ -238,12 +238,12 @@ const default_gitops_sync_deps: GitopsSyncDeps = {
 			fs_paths,
 			git: to_git_program(spawn, { pass_env: GIT_LOCAL_PASS_ENV })
 		}),
-	// searches `process.env`, the project's `.env`, then the parent directory's `.env`,
+	// searches the process env, the project's `.env`, then the parent directory's `.env`,
 	// which SvelteKit's env modules don't, so it doesn't use them
 	load_token: () =>
 		load_from_env(
 			fs_paths,
-			process.env.narrow(['SECRET_GITHUB_API_TOKEN']).get_all(),
+			env.narrow(['SECRET_GITHUB_API_TOKEN']).get_all(),
 			'SECRET_GITHUB_API_TOKEN',
 			['.env', '../.env']
 		),

@@ -3,7 +3,7 @@ import type { Logger } from '@fuzdev/fuz_util/log.ts';
 import * as s from '@fuzdev/fuz_schema/schema.ts';
 import { meta } from '@fuzdev/fuz_schema/meta.ts';
 import { map_concurrent_settled } from '@fuzdev/fuz_util/async.ts';
-import { to_error_message } from '@fuzdev/fuz_util/error.ts';
+import { format_error_detail } from '@fuzdev/gro/error_detail.ts';
 import { to_spawn_result_message } from '@fuzdev/gro/cli.ts';
 import { fs, type FsReadDir } from '@fuzdev/gro/fs.ts';
 import { spawn, type SpawnProgram } from '@fuzdev/gro/spawn.ts';
@@ -168,7 +168,7 @@ const default_gitops_run_deps: GitopsRunDeps = {
 			return await gitops_run_in_shell(sh, command, await fs.open_dir(resolve(cwd)));
 		} catch (error) {
 			return {
-				outcome: { kind: 'error', message: to_error_message(error) },
+				outcome: { kind: 'error', message: format_error_detail(error) },
 				stdout: '',
 				stderr: '',
 				truncated: false
@@ -181,8 +181,8 @@ const default_gitops_run_deps: GitopsRunDeps = {
 export const task: Task<Args> = {
 	Args,
 	summary: 'run a shell command across all repos in parallel',
-	run: async ({ args, log }) => {
-		await run_gitops_run(args, log);
+	run: async ({ task_args, log }) => {
+		await run_gitops_run(task_args, log);
 	}
 };
 
@@ -271,7 +271,7 @@ export const run_gitops_run = async (
 				stderr: '',
 				truncated: false,
 				duration_ms: 0,
-				error: to_error_message(result.reason)
+				error: format_error_detail(result.reason)
 			});
 		}
 	});

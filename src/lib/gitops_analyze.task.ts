@@ -51,8 +51,8 @@ export type Args = s.Infer<typeof Args>;
 export const task: Task<Args> = {
 	Args,
 	summary: 'analyze dependency structure and relationships across repos',
-	run: async ({ args, log }) => {
-		await run_gitops_analyze(args, log);
+	run: async ({ task_args, log }) => {
+		await run_gitops_analyze(task_args, log);
 	}
 };
 

@@ -15,6 +15,7 @@ import { readFile, writeFile, mkdir, stat } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { wait } from '@fuzdev/fuz_util/async.ts';
 import { to_error_message } from '@fuzdev/fuz_util/error.ts';
+import { format_error_detail } from '@fuzdev/gro/error_detail.ts';
 
 import { has_changesets, read_changesets, predict_next_version } from './changeset_reader.ts';
 import { wait_for_package, type NpmRegistryDeps } from './npm_registry.ts';
@@ -125,7 +126,7 @@ export const default_repos_operations: ReposOperations = {
 				output: { stdout: output.stdout, stderr: output.stderr, exit_code: output.code }
 			};
 		} catch (error) {
-			return { ok: false, kind: 'failed', message: to_error_message(error) };
+			return { ok: false, kind: 'failed', message: format_error_detail(error) };
 		}
 	}
 };

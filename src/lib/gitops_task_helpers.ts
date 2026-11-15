@@ -20,7 +20,7 @@ import { TaskError } from '@fuzdev/gro';
 import { styleText as st } from 'node:util';
 import { resolve } from 'node:path';
 import type { Logger } from '@fuzdev/fuz_util/log.ts';
-import { to_error_message } from '@fuzdev/fuz_util/error.ts';
+import { format_error_detail } from '@fuzdev/gro/error_detail.ts';
 
 import { load_gitops_config, type GitopsConfig } from './gitops_config.ts';
 import {
@@ -154,7 +154,7 @@ const import_gitops_config = async (config_path: string): Promise<GitopsConfig> 
 		gitops_config = await load_gitops_config(config_path);
 	} catch (err) {
 		// an invalid config is the user's to fix, not an unexpected task failure
-		throw new TaskError(to_error_message(err));
+		throw new TaskError(format_error_detail(err));
 	}
 	if (!gitops_config) {
 		throw new TaskError(st('red', `No gitops config found at ${config_path}`));

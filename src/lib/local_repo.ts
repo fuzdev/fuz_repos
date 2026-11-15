@@ -1,4 +1,4 @@
-import { to_error_message } from '@fuzdev/fuz_util/error.ts';
+import { format_error_detail } from '@fuzdev/gro/error_detail.ts';
 import { library_json_from_modules, type LibraryJson } from '@fuzdev/fuz_util/library_json.ts';
 import { PackageJson } from '@fuzdev/fuz_util/package_json.ts';
 import * as s from '@fuzdev/fuz_schema/schema.ts';
@@ -198,7 +198,7 @@ export const local_repo_load = async (
 			: await library_load_manifest(repo_dir));
 	} catch (err) {
 		throw new TaskError(
-			`Failed to load library metadata for repo "${repo_name}" in ${repo_dir}: ${to_error_message(err)}`
+			`Failed to load library metadata for repo "${repo_name}" in ${repo_dir}: ${format_error_detail(err)}`
 		);
 	}
 	const library = new Library(library_json);

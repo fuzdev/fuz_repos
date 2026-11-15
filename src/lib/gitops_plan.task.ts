@@ -71,8 +71,8 @@ export type Args = s.Infer<typeof Args>;
 export const task: Task<Args> = {
 	summary: 'generate a publishing plan based on changesets',
 	Args,
-	run: async ({ args, log }): Promise<void> => {
-		await run_gitops_plan(args, log);
+	run: async ({ task_args, log }): Promise<void> => {
+		await run_gitops_plan(task_args, log);
 	}
 };
 

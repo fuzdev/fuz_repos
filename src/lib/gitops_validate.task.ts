@@ -35,8 +35,8 @@ export const task: Task<Args> = {
 	Args,
 	summary:
 		'validate gitops configuration by running all read-only commands and checking for issues',
-	run: async ({ args, log }) => {
-		const { config, registry, verbose } = args;
+	run: async ({ task_args, log }) => {
+		const { config, registry, verbose } = task_args;
 
 		log.info(st('cyan', 'Running Gitops Validation Suite'));
 		log.info(st('dim', 'This runs all read-only commands and checks for consistency.'));

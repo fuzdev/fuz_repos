@@ -3,7 +3,7 @@ import type { Logger } from '@fuzdev/fuz_util/log.ts';
 import * as s from '@fuzdev/fuz_schema/schema.ts';
 import { meta } from '@fuzdev/fuz_schema/meta.ts';
 import { map_concurrent } from '@fuzdev/fuz_util/async.ts';
-import { to_error_message } from '@fuzdev/fuz_util/error.ts';
+import { format_error_detail } from '@fuzdev/gro/error_detail.ts';
 import { relative } from 'node:path';
 import { styleText as st } from 'node:util';
 
@@ -96,8 +96,8 @@ export type Args = s.Infer<typeof Args>;
 export const task: Task<Args> = {
 	summary: 'step a multi-repo release: rewrite released dependencies, name the wave to publish',
 	Args,
-	run: async ({ args, log }): Promise<void> => {
-		await run_gitops_release(args, log);
+	run: async ({ task_args, log }): Promise<void> => {
+		await run_gitops_release(task_args, log);
 	}
 };
 
@@ -242,7 +242,7 @@ export const run_gitops_release = async (
 				});
 				rewritten.push(rewrite.name);
 			} catch (error) {
-				const message = `${rewrite.name}: ${to_error_message(error)}`;
+				const message = `${rewrite.name}: ${format_error_detail(error)}`;
 				rewrite_failures.push(message);
 				log.error(st('red', `  ❌ ${message}`));
 			}

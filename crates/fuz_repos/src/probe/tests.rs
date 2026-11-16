@@ -612,6 +612,13 @@ fn a_git_failure_is_classed_by_how_it_failed() {
             GitError::NonUtf8 { args: args() },
             ProbeErrorKind::UnexpectedOutput,
         ),
+        (
+            GitError::UnexpectedOutput {
+                args: args(),
+                detail: "record `junk`".into(),
+            },
+            ProbeErrorKind::UnexpectedOutput,
+        ),
     ] {
         let message = e.to_string();
         assert_eq!(git_failure(&e), ProbeError::new(kind, message));

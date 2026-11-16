@@ -182,7 +182,9 @@ pub enum GitError {
         /// The timeout that elapsed.
         after: Duration,
     },
-    /// Stdout passed the capture cap, so the call was killed.
+    /// Stdout passed the capture cap. The rest was read and dropped while
+    /// git ran on to its exit, under the call's timeout; its exit status is
+    /// lost.
     #[error("git {args} printed more than {cap} bytes")]
     OutputTooLarge {
         /// The call's arguments, space-joined.
@@ -205,6 +207,15 @@ pub enum GitError {
     NonUtf8 {
         /// The call's arguments, space-joined.
         args: String,
+    },
+    /// Stdout held something the call's parser doesn't recognize, from a
+    /// call that parses it.
+    #[error("git {args} printed unexpected output: {detail}")]
+    UnexpectedOutput {
+        /// The call's arguments, space-joined.
+        args: String,
+        /// What was unexpected, quoting the output lossily and capped.
+        detail: String,
     },
     /// An anonymous read of a URL that has no `<scheme>://`, or carries
     /// userinfo. `url` is shown without its userinfo.

@@ -6,6 +6,10 @@
 //! the runner's module docs state it in full. `url` parses, redacts, and
 //! escapes remote URLs, so no credential reaches an error or a report.
 //!
+//! Read ops on the runner: `Git::ls_files` lists a working tree's files,
+//! tracked and untracked but not ignored, apart from the nested repos and
+//! gitlinks it doesn't descend into.
+//!
 //! Synchronous, with no async runtime: a caller on a runtime wraps calls in
 //! `spawn_blocking`.
 //!
@@ -13,9 +17,11 @@
 
 #![warn(missing_docs)]
 
+mod ls_files;
 mod runner;
 pub mod url;
 
+pub use ls_files::ListedFiles;
 pub use runner::{
     CallOptions, Git, GitError, GitOutput, GitVersion, MIN_GIT_VERSION, NetworkOptions,
     VersionError,

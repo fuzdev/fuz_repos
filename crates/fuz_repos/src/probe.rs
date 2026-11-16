@@ -1863,9 +1863,9 @@ fn git_failure(e: &GitError) -> ProbeError {
         }
         GitError::Timeout { .. } => ProbeErrorKind::GitTimedOut,
         GitError::Failed { .. } => ProbeErrorKind::GitFailed,
-        GitError::OutputTooLarge { .. } | GitError::NonUtf8 { .. } => {
-            ProbeErrorKind::UnexpectedOutput
-        }
+        GitError::OutputTooLarge { .. }
+        | GitError::NonUtf8 { .. }
+        | GitError::UnexpectedOutput { .. } => ProbeErrorKind::UnexpectedOutput,
     };
     ProbeError::new(kind, e.to_string())
 }

@@ -795,3 +795,55 @@ fn issues_serialize_kind_tagged() {
         })
     );
 }
+
+#[test]
+fn parse_from_text_is_load_without_the_read() {
+    let tmp = tempfile::tempdir().unwrap();
+    let path = tmp.path().join("repos.toml");
+    // what `load` makes of `src` at `path`, and what `parse` makes of it
+    let both = |src: &str| {
+        std::fs::write(&path, src).unwrap();
+        (ValidRegistry::load(&path), ValidRegistry::parse(src, &path))
+    };
+
+    let (loaded, parsed) = both(MINIMAL);
+    let keys =
+        |r: &ValidRegistry| -> Vec<String> { r.entries().into_iter().map(|e| e.key).collect() };
+    assert_eq!(keys(&parsed.unwrap()), keys(&loaded.unwrap()));
+
+    // a schema error, credentials redacted, and an integrity one: the same
+    // errors, naming the same path
+    let bad_toml =
+        "owners = []\n[repos.a]\nurl = \"https://me:secret@github.com/me/a\"\nnope = 1\n";
+    let unowned = "owners = [\"me\"]\n[repos.a]\nurl = \"https://github.com/them/a\"\n\
+                   visibility = \"public\"\npurpose = \"x\"\n";
+    for (src, parse_error) in [(bad_toml, true), (unowned, false)] {
+        let (loaded, parsed) = both(src);
+        let (loaded, parsed) = (loaded.unwrap_err(), parsed.unwrap_err());
+        assert_eq!(parsed.to_string(), loaded.to_string());
+        assert_eq!(parsed.kind(), loaded.kind());
+        assert_eq!(
+            matches!(parsed, Error::RegistryParse { .. }),
+            parse_error,
+            "{parsed}"
+        );
+        assert_eq!(
+            matches!(parsed, Error::RegistryInvalid { .. }),
+            !parse_error,
+            "{parsed}"
+        );
+        assert!(
+            parsed.to_string().contains(&path.display().to_string()),
+            "{parsed}"
+        );
+        assert!(!parsed.to_string().contains("secret"), "{parsed}");
+    }
+
+    // only `load` reads
+    std::fs::remove_file(&path).unwrap();
+    assert!(matches!(
+        ValidRegistry::load(&path),
+        Err(Error::RegistryRead { .. })
+    ));
+    assert!(ValidRegistry::parse(MINIMAL, &path).is_ok());
+}

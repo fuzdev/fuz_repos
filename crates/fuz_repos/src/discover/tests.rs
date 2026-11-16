@@ -290,6 +290,476 @@ fn a_discovered_root_is_checked_only_inside_a_checkout() {
     assert_eq!(git.spawns(), 2);
 }
 
+/// `discover_registry` taking every candidate: the `(kind, dir)` of each
+/// offered, and the root it found.
+fn discover_all(
+    start: &Path,
+    bound: Option<&Bound>,
+    git: &Git,
+) -> (Vec<(CandidateKind, PathBuf)>, Option<PathBuf>) {
+    let mut offered = Vec::new();
+    let Ok(found) = discover_registry(start, bound, git, |c| {
+        offered.push((c.kind, c.dir.to_owned()));
+        Ok::<_, Infallible>(Some(()))
+    });
+    (offered, found.map(|(f, ())| f.root))
+}
+
+/// A bound strictly below `dir`.
+fn bound_below(dir: &Path) -> Bound {
+    Bound::below(dir).unwrap()
+}
+
+/// A bound at most `dir`.
+fn bound_within(dir: &Path) -> Bound {
+    Bound::within(dir).unwrap()
+}
+
+#[test]
+fn the_bound_holds_the_walk() {
+    let tmp = tempfile::tempdir().unwrap();
+    let top = tmp.path().canonicalize().unwrap();
+    let ws = top.join("ws");
+    place(&ws, None);
+    let deep = ws.join("a/b");
+    std::fs::create_dir_all(&deep).unwrap();
+
+    let git = Git::new();
+    let root = |start: &Path, bound: Option<&Bound>| discover_all(start, bound, &git).1;
+    assert_eq!(root(&deep, None), Some(ws.clone()));
+    assert_eq!(root(&deep, Some(&bound_below(&top))), Some(ws.clone()));
+    assert_eq!(root(&deep, Some(&bound_within(&ws))), Some(ws.clone()));
+    // a registry at a `below` bound or above any bound isn't found
+    assert_eq!(root(&deep, Some(&bound_below(&ws))), None);
+    assert_eq!(root(&deep, Some(&bound_within(&ws.join("a")))), None);
+    // nor from the bound's own dir when it's excluded, or from outside it
+    assert_eq!(root(&ws, Some(&bound_below(&ws))), None);
+    assert_eq!(root(&top, Some(&bound_within(&ws))), None);
+    // each walk inside a bound that found nothing asked git once for a
+    // main checkout (under the bound's ceiling); the rest never walked
+    assert_eq!(git.spawns(), 2);
+
+    // a bound that can't be resolved is refused when it's made
+    assert!(Bound::below(&top.join("nope")).is_err());
+
+    // a link to a checkout's registry, outside the bound, doesn't root it
+    let tmp = tempfile::tempdir().unwrap();
+    let top = tmp.path().canonicalize().unwrap();
+    let ws = top.join("ws");
+    let meta = ws.join("meta");
+    let real = place(&meta, None);
+    checkout(&meta);
+    place(&ws, Some(&real));
+    assert_eq!(root(&meta, Some(&bound_below(&top))), Some(ws.clone()));
+    assert_eq!(root(&meta, Some(&bound_within(&ws))), Some(ws.clone()));
+    assert_eq!(root(&meta, Some(&bound_below(&ws))), Some(meta.clone()));
+    assert_eq!(root(&meta, Some(&bound_within(&meta))), Some(meta.clone()));
+
+    // a `.git` outside the bound makes no checkout: a linked worktree's
+    // `.git` file there sends nothing to git
+    let tmp = tempfile::tempdir().unwrap();
+    let ws = tmp.path().canonicalize().unwrap().join("ws");
+    let inner = ws.join("inner");
+    place(&inner, None);
+    std::fs::write(ws.join(".git"), "gitdir: nowhere\n").unwrap();
+    let git = Git::new();
+    let found = discover_all(&inner, Some(&bound_below(&ws)), &git).1;
+    assert_eq!(found, Some(inner.clone()));
+    assert_eq!(git.spawns(), 0);
+    assert_eq!(discover_all(&inner, None, &git).1, Some(inner));
+    assert_eq!(git.spawns(), 1);
+}
+
+#[test]
+fn a_bound_is_physical_and_never_names_a_colon_to_git() {
+    let tmp = tempfile::tempdir().unwrap();
+    let top = tmp.path().canonicalize().unwrap();
+    let ws = top.join("ws");
+    place(&ws, None);
+    let deep = ws.join("a/b");
+    std::fs::create_dir_all(&deep).unwrap();
+    let git = Git::new();
+
+    // a bound given through a symlink, or spelled with `..`, is its target
+    let alias = top.join("alias");
+    std::os::unix::fs::symlink(&ws, &alias).unwrap();
+    assert_eq!(bound_below(&alias), bound_below(&ws));
+    assert_eq!(bound_within(&alias).dir(), ws);
+    assert_eq!(bound_below(&ws.join("a/..")), bound_below(&ws));
+    assert_eq!(
+        discover_all(&deep, Some(&bound_below(&alias)), &git).1,
+        None
+    );
+    assert_eq!(
+        discover_all(&deep, Some(&bound_within(&alias)), &git).1,
+        Some(ws.clone())
+    );
+
+    // a start through a symlinked dir is walked physically: into the
+    // bound from outside it, or out of it from inside
+    let outside = top.join("outside");
+    std::fs::create_dir(&outside).unwrap();
+    std::os::unix::fs::symlink(&deep, outside.join("in")).unwrap();
+    std::os::unix::fs::symlink(&outside, deep.join("out")).unwrap();
+    let bound = bound_within(&ws);
+    assert_eq!(
+        discover_all(&outside.join("in"), Some(&bound), &git).1,
+        Some(ws)
+    );
+    assert_eq!(discover_all(&deep.join("out"), Some(&bound), &git).1, None);
+
+    // git's ceiling — the dir, or an inclusive bound's parent — can't hold
+    // a `:`; the bound's own name under `within` can
+    let colon = top.join("a:b");
+    std::fs::create_dir_all(colon.join("r")).unwrap();
+    for e in [
+        Bound::below(&colon).unwrap_err(),
+        Bound::within(&colon.join("r")).unwrap_err(),
+    ] {
+        assert_eq!(e.kind(), std::io::ErrorKind::InvalidInput, "{e}");
+    }
+    assert!(Bound::within(&colon).is_ok());
+
+    // a bound is a directory
+    let file = place(&top.join("f"), None);
+    for e in [
+        Bound::below(&file).unwrap_err(),
+        Bound::within(&file).unwrap_err(),
+    ] {
+        assert_eq!(e.kind(), std::io::ErrorKind::InvalidInput, "{e}");
+    }
+}
+
+#[test]
+fn the_hook_vets_each_candidate_and_a_skip_walks_on() {
+    let tmp = tempfile::tempdir().unwrap();
+    let top = tmp.path().canonicalize().unwrap();
+    let ws = top.join("ws");
+    let meta = ws.join("meta");
+    // `meta`'s registry, linked at `ws`; an unrelated one further out
+    let real = place(&meta, None);
+    checkout(&meta);
+    place(&ws, Some(&real));
+    place(&top, None);
+
+    let git = Git::new();
+    let (offered, root) = discover_all(&meta, None, &git);
+    assert_eq!(
+        offered,
+        [
+            (CandidateKind::Nearest, meta.clone()),
+            (CandidateKind::Link, ws.clone())
+        ]
+    );
+    assert_eq!(root, Some(ws.clone()));
+
+    // the root and token a hook skipping the candidates `skip` names
+    // finds — its token, the candidate's place in the offers — and what
+    // it was offered
+    let skipping = |skip: &[(CandidateKind, &Path)]| {
+        let mut offered = Vec::new();
+        let Ok(found) = discover_registry(&meta, None, &git, |c| {
+            offered.push((c.kind, c.dir.to_owned()));
+            Ok::<_, Infallible>((!skip.contains(&(c.kind, c.dir))).then_some(offered.len()))
+        });
+        (offered, found.map(|(f, token)| (f.root, token)))
+    };
+    // the last taken is the result, with its token
+    let (_, found) = skipping(&[]);
+    assert_eq!(found, Some((ws.clone(), 2)));
+    // a skipped link: the next one out, else the nearest's dir, with the
+    // nearest's token
+    let (offered, found) = skipping(&[(CandidateKind::Link, &ws)]);
+    assert_eq!(offered.len(), 2);
+    assert_eq!(found, Some((meta.clone(), 1)));
+    // a skipped nearest: as though it weren't there — the link at `ws` is
+    // then the nearest, outside any checkout
+    let (offered, found) = skipping(&[(CandidateKind::Nearest, &meta)]);
+    assert_eq!(
+        offered,
+        [
+            (CandidateKind::Nearest, meta.clone()),
+            (CandidateKind::Nearest, ws.clone())
+        ]
+    );
+    assert_eq!(found, Some((ws.clone(), 2)));
+    let (_, found) = skipping(&[
+        (CandidateKind::Nearest, &meta),
+        (CandidateKind::Nearest, &ws),
+    ]);
+    assert_eq!(found, Some((top.clone(), 3)));
+    // every one skipped: nothing found, and git asked for a main checkout
+    let spawns = git.spawns();
+    let (offered, found) = skipping(&[
+        (CandidateKind::Nearest, &meta),
+        (CandidateKind::Nearest, &ws),
+        (CandidateKind::Nearest, &top),
+    ]);
+    assert_eq!(offered.len(), 3);
+    assert_eq!(found, None);
+    assert_eq!(git.spawns(), spawns + 1);
+
+    // an error ends the walk with it, offering nothing more
+    let mut offered = 0;
+    let refused = discover_registry(&meta, None, &git, |c| {
+        offered += 1;
+        if c.kind == CandidateKind::Link {
+            Err(c.path.to_owned())
+        } else {
+            Ok(Some(()))
+        }
+    });
+    assert_eq!(refused.unwrap_err(), ws.join(REGISTRY_FILE));
+    assert_eq!(offered, 2);
+}
+
+#[test]
+fn a_candidate_reports_its_file_and_link_target() {
+    let tmp = tempfile::tempdir().unwrap();
+    let top = tmp.path().canonicalize().unwrap();
+    let ws = top.join("ws");
+    let meta = ws.join("meta");
+    let real = place(&meta, None);
+    checkout(&meta);
+    // linked relatively, as a workspace link usually is
+    let link = place(&ws, Some(Path::new("meta/repos.toml")));
+    let id = file_id(&real).unwrap();
+
+    // a token tying the result to what the hook checked: the file it
+    // opened (a real hook opens with `O_NONBLOCK`), a regular file on the
+    // descriptor, its identity the walk's. A mismatch is an `Err`, never a
+    // skip: skipping would let the walk widen the root past it.
+    let mut seen = Vec::new();
+    let (found, file) = discover_registry(&meta, None, &Git::new(), |c| {
+        seen.push((c.kind, c.path.to_owned(), c.file, c.link_target()?));
+        let file = std::fs::File::open(c.path)?;
+        let opened = file.metadata()?;
+        if !opened.is_file() || to_file_id(&opened) != c.file {
+            return Err(std::io::Error::other("not the file the walk saw"));
+        }
+        Ok(Some(file))
+    })
+    .unwrap()
+    .unwrap();
+    assert_eq!(
+        seen,
+        [
+            (CandidateKind::Nearest, real.clone(), id, None),
+            (CandidateKind::Link, link.clone(), id, Some(real)),
+        ]
+    );
+    assert_eq!(to_file_id(&file.metadata().unwrap()), id);
+    // the root is the link's dir, its path the link as found
+    assert_eq!(found.root, ws);
+    assert_eq!(found.path, link);
+    assert!(found.discovered);
+    // a target outside the dir it would root reads as such
+    let outside = top.join("elsewhere");
+    let far = place(&outside, None);
+    let stray = place(&outside.join("in"), Some(&far));
+    let candidate = Candidate {
+        path: &stray,
+        dir: stray.parent().unwrap(),
+        kind: CandidateKind::Nearest,
+        file: file_id(&stray).unwrap(),
+    };
+    let target = candidate.link_target().unwrap().unwrap();
+    assert!(!target.starts_with(candidate.dir));
+    // a dangling link: its target can't be resolved
+    let dangling = top.join("dangling");
+    std::os::unix::fs::symlink(top.join("nowhere"), &dangling).unwrap();
+    let candidate = Candidate {
+        path: &dangling,
+        ..candidate
+    };
+    assert!(candidate.link_target().is_err());
+}
+
+/// Runs git in `dir` with no global or system config.
+fn git_in(dir: &Path, args: &[&str]) {
+    let status = std::process::Command::new("git")
+        .env_clear()
+        .envs(std::env::var_os("PATH").map(|p| ("PATH", p)))
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .args(["-c", "user.name=t", "-c", "user.email=t@t"])
+        .arg("-C")
+        .arg(dir)
+        .args(args)
+        .status()
+        .unwrap();
+    assert!(status.success(), "git {args:?}");
+}
+
+/// A repo at `main` with one commit, and a linked worktree of it at `wt`.
+fn repo_with_worktree(main: &Path, wt: &Path) {
+    std::fs::create_dir_all(main).unwrap();
+    git_in(main, &["init", "-q", "-b", "main"]);
+    git_in(main, &["commit", "-q", "--allow-empty", "-m", "x"]);
+    let wt = wt.to_str().unwrap();
+    git_in(main, &["worktree", "add", "-q", "-b", "wt", wt]);
+}
+
+#[test]
+fn a_bound_holds_the_jump_from_a_linked_worktree() {
+    let tmp = tempfile::tempdir().unwrap();
+    let srv = tmp.path().canonicalize().unwrap();
+    // the worktree under `srv/r`; its main checkout beside it, in a
+    // workspace linking its registry
+    let r = srv.join("r");
+    let wt = r.join("wt");
+    let other = srv.join("other");
+    let meta = other.join("meta");
+    std::fs::create_dir_all(&r).unwrap();
+    repo_with_worktree(&meta, &wt);
+    let real = place(&meta, None);
+    place(&other, Some(&real));
+    // the worktree's own copy, linked nowhere
+    place(&wt, None);
+
+    let git = Git::new();
+    // unbounded, or bounded where the main checkout is inside: the jump
+    // roots at the link above the main checkout, which doesn't hold `wt`
+    let unbounded = discover_all(&wt, None, &git);
+    assert_eq!(
+        unbounded,
+        (
+            vec![
+                (CandidateKind::Nearest, wt.clone()),
+                (CandidateKind::Link, other.clone())
+            ],
+            Some(other.clone())
+        )
+    );
+    assert_eq!(
+        discover_all(&wt, Some(&bound_within(&srv)), &git),
+        unbounded
+    );
+    // within `r`, the main checkout is outside: no jump, and the
+    // worktree's copy stays where it's found
+    assert_eq!(
+        discover_all(&wt, Some(&bound_within(&r)), &git),
+        (vec![(CandidateKind::Nearest, wt.clone())], Some(wt.clone()))
+    );
+
+    // with no copy in the worktree, the fallback walk from the main
+    // checkout: offered from there, a `Nearest` at the main checkout
+    std::fs::remove_file(wt.join(REGISTRY_FILE)).unwrap();
+    assert_eq!(
+        discover_all(&wt, None, &git),
+        (
+            vec![
+                (CandidateKind::Nearest, meta),
+                (CandidateKind::Link, other.clone())
+            ],
+            Some(other)
+        )
+    );
+    assert_eq!(
+        discover_all(&wt, Some(&bound_within(&r)), &git),
+        (vec![], None)
+    );
+
+    // the main checkout a sibling inside the bound: the jump stays inside
+    let tmp = tempfile::tempdir().unwrap();
+    let r = tmp.path().canonicalize().unwrap().join("r");
+    let (meta, wt) = (r.join("meta"), r.join("wt"));
+    std::fs::create_dir_all(&r).unwrap();
+    repo_with_worktree(&meta, &wt);
+    let real = place(&meta, None);
+    place(&r, Some(&real));
+    place(&wt, None);
+    assert_eq!(
+        discover_all(&wt, Some(&bound_within(&r)), &git).1,
+        Some(r.clone())
+    );
+    assert_eq!(discover_all(&wt, Some(&bound_below(&r)), &git).1, Some(wt));
+}
+
+#[test]
+fn entry_holding_root_names_the_entry_whose_checkout_holds_the_root() {
+    let tmp = tempfile::tempdir().unwrap();
+    let top = tmp.path().canonicalize().unwrap();
+    // the registry's own repo, cloned with no link above it
+    let meta = top.join("meta");
+    place(&meta, None);
+    git_in(&meta, &["init", "-q"]);
+    git_in(
+        &meta,
+        &["remote", "add", "origin", "https://github.com/me/meta"],
+    );
+    let es = entries(&["app", "meta"]);
+    let git = Git::new();
+
+    let Ok(found) = discover_registry(&meta.join(".git"), None, &git, |_| {
+        Ok::<_, Infallible>(Some(()))
+    });
+    let (found, ()) = found.unwrap();
+    assert_eq!(found.root, meta);
+    let named = |root: &Path, es: &[Entry], bound: Option<&Bound>| {
+        entry_holding_root(root, es, bound, &git).map(|e| e.key.clone())
+    };
+    assert_eq!(named(&found.root, &es, None).as_deref(), Some("meta"));
+    assert_eq!(
+        named(&found.root, &es, Some(&bound_within(&meta))).as_deref(),
+        Some("meta")
+    );
+    // `repos` refuses it
+    let e = check_discovered_root(&found, &es, &git).unwrap_err();
+    assert!(
+        matches!(&e, Error::RootInEntry { key, root, .. } if key == "meta" && *root == meta),
+        "{e}"
+    );
+    // a root spelled through a symlink is read physically, as the bound is
+    let alias = top.join("alias");
+    std::os::unix::fs::symlink(&meta, &alias).unwrap();
+    assert_eq!(
+        named(&alias, &es, Some(&bound_within(&meta))).as_deref(),
+        Some("meta")
+    );
+    assert!(named(&top.join("nope"), &es, None).is_none());
+    // a checkout of no entry, or no checkout, names none
+    assert!(named(&found.root, &entries(&["app"]), None).is_none());
+    assert!(named(&top, &es, None).is_none());
+}
+
+#[test]
+fn entry_holding_root_reads_no_checkout_outside_the_bound() {
+    // `$HOME` a dotfiles repo the registry lists, the workspace under it
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path().canonicalize().unwrap().join("home");
+    let dev = home.join("dev");
+    std::fs::create_dir_all(&home).unwrap();
+    git_in(&home, &["init", "-q"]);
+    git_in(
+        &home,
+        &["remote", "add", "origin", "https://github.com/me/dots"],
+    );
+    place(&dev, None);
+    let es = entries(&["app", "dots"]);
+
+    let git = Git::new();
+    let bound = bound_below(&home);
+    let (_, root) = discover_all(&dev.join("."), Some(&bound), &git);
+    assert_eq!(root.as_deref(), Some(dev.as_path()));
+    // inside the bound, `$HOME`'s checkout isn't read
+    assert!(entry_holding_root(&dev, &es, Some(&bound), &git).is_none());
+    assert_eq!(git.spawns(), 0);
+    // unbounded, as `repos` reads it, it is
+    let named = |root: &Path, bound: Option<&Bound>| {
+        entry_holding_root(root, &es, bound, &git).map(|e| e.key.clone())
+    };
+    assert_eq!(named(&dev, None).as_deref(), Some("dots"));
+
+    // a `.git` that isn't a git dir, inside the bound: git, run there,
+    // searches up — stopped by the bound's ceiling
+    let x = dev.join("x");
+    std::fs::create_dir_all(x.join(".git")).unwrap();
+    assert_eq!(named(&x, None).as_deref(), Some("dots"));
+    assert_eq!(named(&x, Some(&bound)), None);
+    assert_eq!(named(&x, Some(&bound_within(&dev))), None);
+}
+
 #[test]
 fn an_explicit_registry_roots_at_its_dir_links_or_not() {
     let tmp = tempfile::tempdir().unwrap();

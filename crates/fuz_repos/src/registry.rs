@@ -361,11 +361,17 @@ impl Registry {
     /// `RegistryRead` when the file can't be read, `RegistryParse` when it
     /// doesn't match the core schema.
     pub fn load(path: &Path) -> Result<Self> {
-        let src = std::fs::read_to_string(path).map_err(|source| Error::RegistryRead {
-            path: path.to_owned(),
-            source,
-        })?;
-        Self::parse(&src).map_err(|e| Error::RegistryParse {
+        Self::parse_at(&read_registry(path)?, path)
+    }
+
+    /// Parses `src`, the text of the registry at `path`, which the error
+    /// names.
+    ///
+    /// # Errors
+    ///
+    /// `RegistryParse` when it doesn't match the core schema.
+    fn parse_at(src: &str, path: &Path) -> Result<Self> {
+        Self::parse(src).map_err(|e| Error::RegistryParse {
             path: path.to_owned(),
             // the parser quotes the offending line, credentials and all
             message: fuz_git::url::redact_userinfo_in(&e.to_string()),
@@ -504,6 +510,18 @@ fn entry_dir(dir: Option<&String>, url: &RepoUrl) -> String {
     dir.cloned().unwrap_or_else(|| url.name.clone())
 }
 
+/// The text of the registry at `path`.
+///
+/// # Errors
+///
+/// `RegistryRead` when the file can't be read.
+fn read_registry(path: &Path) -> Result<String> {
+    std::fs::read_to_string(path).map_err(|source| Error::RegistryRead {
+        path: path.to_owned(),
+        source,
+    })
+}
+
 /// A registry every integrity rule holds for (`Registry::validate`): what
 /// the rest of the tool works from, so no code downstream of loading sees
 /// an unvalidated one.
@@ -518,7 +536,19 @@ impl ValidRegistry {
     /// `RegistryRead` and `RegistryParse` as `Registry::load` returns them;
     /// `RegistryInvalid` with every issue `Registry::validate` finds.
     pub fn load(path: &Path) -> Result<Self> {
-        Registry::load(path)?
+        Self::parse(&read_registry(path)?, path)
+    }
+
+    /// Parses and validates `src`, the text of the registry at `path` —
+    /// `load` for a caller that reads the file itself: one that checks the
+    /// file it opened before reading it, or caps the read, and then parses
+    /// exactly the text it checked. `path` is only named in errors.
+    ///
+    /// # Errors
+    ///
+    /// `RegistryParse` and `RegistryInvalid` as `load` returns them.
+    pub fn parse(src: &str, path: &Path) -> Result<Self> {
+        Registry::parse_at(src, path)?
             .validate()
             .map_err(|issues| Error::RegistryInvalid {
                 path: path.to_owned(),

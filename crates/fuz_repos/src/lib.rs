@@ -12,7 +12,13 @@
 //! it the report carries, so any caller gets the binary's verdicts.
 //! `status::checkout_status` is `status --brief`'s probe of the one
 //! checkout holding a path; `discover::Workspace::load` is the loading
-//! alone.
+//! alone. A caller that opens a registry on its own terms — under a trust
+//! rule, within a bound — has its parts: `discover::discover_registry`
+//! (the walk, inside a `discover::Bound`, each candidate offered to a hook
+//! whose token — the file it checked — comes back with the result),
+//! `registry::ValidRegistry::parse` (the text it read itself, validated),
+//! and `discover::entry_holding_root` (the root `repos` refuses as an
+//! entry's checkout).
 //!
 //! Beneath them, public for a caller driving one phase (and for the
 //! integration tests): the registry (`registry`: parsed, then validated

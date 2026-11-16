@@ -7,10 +7,10 @@ use std::borrow::Cow;
 use std::fmt::Write as _;
 use std::path::PathBuf;
 
+use fuz_git::{GitVersion, MIN_GIT_VERSION};
 use serde::Serialize;
 use thiserror::Error;
 
-use crate::git::{GitVersion, MIN_GIT_VERSION};
 use crate::registry::RegistryIssue;
 
 /// A failure that stops a run before it has a report.

@@ -103,8 +103,8 @@ gro's, in the publish tier.
 ### What `repos` never does
 
 Each is structural, in the code (the rustdoc of `sync.rs`, `push.rs`,
-`clone.rs`, `git.rs`, `probe.rs` (fetch confinement), and `busy.rs` and
-`sessions.rs` (busy detection) says how):
+`clone.rs`, `probe.rs` (fetch confinement), the `fuz_git` crate's `runner.rs`,
+and `busy.rs` and `sessions.rs` (busy detection) says how):
 
 - never `pull`s, merges anything but a fast-forward, or resolves a conflict.
   The one history change is a rebase (`repos sync`'s, and `repos push`'s for
@@ -191,14 +191,14 @@ path, so `gro task src/lib/gitops_*.task.ts` (e.g.
 project's own config, publishing, and dashboard data — a bare
 `gro gitops_sync` names a Gro builtin and fails.
 
-The Rust side lives in this repo as one crate, `crates/fuz_repos` (a library
-plus the `repos` binary), and moves refs under the authoring rule above — git
-only, no API calls. `repos status` reports each entry's git state from local
-refs (`--fetch` refreshes them first), `repos sync` carries out the
-fast-forwards, moves, rebases, pushes, and clones `status` previews, and `repos push`,
-the gateway, pushes one checkout's branch through sync's own push, rebasing
-it first through sync's own rebase when it diverged — each in
-[docs/repos.md](docs/repos.md#commands).
+The Rust side lives in this repo as two crates, `crates/fuz_git` (the git
+runner) and `crates/fuz_repos` (a library plus the `repos` binary), and moves
+refs under the authoring rule above — git only, no API calls. `repos status`
+reports each entry's git state from local refs (`--fetch` refreshes them
+first), `repos sync` carries out the fast-forwards, moves, rebases, pushes,
+and clones `status` previews, and `repos push`, the gateway, pushes one
+checkout's branch through sync's own push, rebasing it first through sync's
+own rebase when it diverged — each in [docs/repos.md](docs/repos.md#commands).
 
 The structured model of each repo's git state — every local branch against
 its upstream, dirt by kind, local-only work, stashes, operations in progress,
@@ -283,11 +283,14 @@ Every `src/lib` module is listed here or under
   stdout routing, and log formatting
 - `src/lib/repos_status.ts` - fuz_schema mirror of the `repos status --json`
   document (report and error document), guarded by the goldens
-- `crates/fuz_repos/` - the Rust `repos` tool: a library — registry, git
-  runner, probe, unregistered scan, busy detection, classification, sync,
-  push, and the entry points that load a registry and return a finished
-  report (`status_report`, `sync_report`, `push_report`) — and the `repos`
-  binary, which parses arguments, renders, and owns exit codes
+- `crates/fuz_git/` - the hardened git runner and remote-URL parsing and
+  redaction shared across the ecosystem: synchronous, no async runtime
+  (callers on one use `spawn_blocking`), `thiserror` its only dependency
+- `crates/fuz_repos/` - the Rust `repos` tool: a library — registry, probe,
+  unregistered scan, busy detection, classification, sync, push, and the
+  entry points that load a registry and return a finished report
+  (`status_report`, `sync_report`, `push_report`) — and the `repos` binary,
+  which parses arguments, renders, and owns exit codes
 - `crates/fuz_repos/tests/` - its integration tests over fixture workspaces
   (`tests/support`)
 - `docs/repos.md` - the `repos` command reference

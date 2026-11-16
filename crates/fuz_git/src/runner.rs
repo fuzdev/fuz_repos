@@ -1,7 +1,7 @@
-//! The one way this crate runs git: hardened flags and env, a per-call
-//! timeout, and capped output capture.
+//! The runner: hardened flags and env, a per-call timeout, and capped
+//! output capture, the one way a caller of this crate runs git.
 //!
-//! **What git may run on the tool's behalf.** The trust boundary is the
+//! **What git may run on a caller's behalf.** The trust boundary is the
 //! user's own git config, not the repo's content or its remote:
 //!
 //! - Never run, whatever any config says, since the code they'd run can
@@ -22,13 +22,14 @@
 //!   them would check out pointer files or skip a verification the user
 //!   asked for. A merge driver is the one exception, and only in a
 //!   rebase's replay, which runs none: merging a path there would settle a
-//!   conflict (the `sync` module doc says how).
+//!   conflict (a replay is the one call that merges).
 //!
 //! Optional locks are off too, so observing never rewrites another
 //! session's index, and lazy fetching is off, so a local call on a partial
 //! clone never touches the network — but for the clone that makes one,
-//! whose checkout fills it, and for sync's fast-forward or move in one's
-//! checkout, which needs the new tip's blobs (`CallOptions::lazy_fetch`).
+//! whose checkout fills it, and for a fast-forward or branch move in a
+//! partial clone's checkout, which needs the new tip's blobs
+//! (`CallOptions::lazy_fetch`).
 
 use std::ffi::OsString;
 use std::io::{self, Read, Write};
@@ -110,8 +111,11 @@ pub const MIN_GIT_VERSION: GitVersion = GitVersion {
 /// A git release, compared by its numeric components.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct GitVersion {
+    /// The major number.
     pub major: u32,
+    /// The minor number.
     pub minor: u32,
+    /// The patch number, `0` when git prints none.
     pub patch: u32,
 }
 
@@ -163,31 +167,76 @@ fn version_line(output: &str) -> Option<&str> {
 
 /// A git call that didn't produce usable output.
 #[derive(Debug, Error)]
-pub(crate) enum GitError {
+pub enum GitError {
+    /// Git isn't on `PATH`.
     #[error("git not found on PATH")]
     NotFound,
+    /// The process failed to spawn, or its pipes failed.
     #[error("failed to run git: {0}")]
     Spawn(#[source] io::Error),
+    /// The call outlived its timeout and was killed.
     #[error("git {args} timed out after {}s", after.as_secs())]
-    Timeout { args: String, after: Duration },
+    Timeout {
+        /// The call's arguments, space-joined.
+        args: String,
+        /// The timeout that elapsed.
+        after: Duration,
+    },
+    /// Stdout passed the capture cap, so the call was killed.
     #[error("git {args} printed more than {cap} bytes")]
-    OutputTooLarge { args: String, cap: usize },
+    OutputTooLarge {
+        /// The call's arguments, space-joined.
+        args: String,
+        /// The cap, in bytes.
+        cap: usize,
+    },
+    /// A non-zero exit, from a call that treats one as an error.
     #[error("git {args} failed{}: {stderr}", code.map_or_else(String::new, |c| format!(" ({c})")))]
     Failed {
+        /// The call's arguments, space-joined.
         args: String,
+        /// The exit code, `None` when a signal ended the process.
         code: Option<i32>,
+        /// Git's trimmed stderr.
         stderr: String,
     },
+    /// Stdout wasn't UTF-8, from a call that decodes it.
     #[error("git {args} printed non-UTF-8 output")]
-    NonUtf8 { args: String },
-    /// `url` is shown without its userinfo (`without_userinfo`).
+    NonUtf8 {
+        /// The call's arguments, space-joined.
+        args: String,
+    },
+    /// An anonymous read of a URL that has no `<scheme>://`, or carries
+    /// userinfo. `url` is shown without its userinfo.
     #[error("`{url}` is not a `<scheme>://` URL without credentials")]
-    UnsupportedUrl { url: String },
+    UnsupportedUrl {
+        /// The URL, without its userinfo (`url::without_userinfo`).
+        url: String,
+    },
+}
+
+/// Why `Git::check_version` found no usable git.
+#[derive(Debug, Error)]
+pub enum VersionError {
+    /// Git isn't on `PATH`.
+    #[error("git not found on PATH")]
+    NotFound,
+    /// Git is older than `MIN_GIT_VERSION`, or its version is unrecognized.
+    #[error("git reports version `{found}`; {required} or newer is required")]
+    TooOld {
+        /// The version git reported, or a description of what it printed.
+        found: String,
+        /// `MIN_GIT_VERSION`.
+        required: GitVersion,
+    },
+    /// `git --version` failed to run for another reason.
+    #[error("failed to run git --version")]
+    Run(#[source] GitError),
 }
 
 /// Per-call options.
 #[derive(Debug, Clone, Copy, Default)]
-pub(crate) struct CallOptions<'a> {
+pub struct CallOptions<'a> {
     /// Stop repo discovery above this dir (`GIT_CEILING_DIRECTORIES`), so a
     /// dir that isn't a repo never resolves to a parent's.
     pub ceiling: Option<&'a Path>,
@@ -208,7 +257,7 @@ pub(crate) struct CallOptions<'a> {
     /// a caller lifting it names the one transport allowed
     /// (`allow_protocol`).
     pub lazy_fetch: bool,
-    /// Variables set for this call alone: the tool's own, never `GIT_*`
+    /// Variables set for this call alone: the caller's own, never `GIT_*`
     /// (git's own are the runner's to set or scrub, some only under an
     /// option). For the values a `--config-env` names, which git reads
     /// whole, `=` and all, where `-c` splits its argument at the first `=`.
@@ -221,7 +270,7 @@ pub(crate) struct CallOptions<'a> {
 
 /// Options for a call that reaches a remote.
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct NetworkOptions {
+pub struct NetworkOptions {
     /// Whether to set `GIT_SSH_COMMAND` to batch mode with a connect timeout.
     /// Off when the repo sets `core.sshCommand` or the env sets
     /// `GIT_SSH_COMMAND`/`GIT_SSH`.
@@ -230,13 +279,16 @@ pub(crate) struct NetworkOptions {
 
 /// A finished git call.
 #[derive(Debug)]
-pub(crate) struct GitOutput {
+pub struct GitOutput {
+    /// The exit status.
     pub status: ExitStatus,
+    /// Stdout, capped.
     pub stdout: Vec<u8>,
+    /// Stderr, lossily decoded.
     pub stderr: String,
 }
 
-/// The runner. Shared by reference across the pool; counts its spawns.
+/// The runner. Shared by reference across threads; counts its spawns.
 #[derive(Debug, Default)]
 pub struct Git {
     spawns: AtomicU32,
@@ -246,6 +298,8 @@ pub struct Git {
 }
 
 impl Git {
+    /// A runner that inherits the caller's environment (besides its own
+    /// hardening).
     pub fn new() -> Self {
         Self::default()
     }
@@ -253,11 +307,11 @@ impl Git {
     /// A runner whose git calls see only `env` plus the runner's own
     /// hardening — no inherited variable reaches git, so neither the caller's
     /// `HOME` (and with it the global config and excludes file) nor its
-    /// `GIT_*` settings apply. The system config still does unless `env` sets
-    /// `GIT_CONFIG_NOSYSTEM`. git and its own children (ssh, `!` aliases,
-    /// hooks) all search `env`'s `PATH`, never the caller's, so `env` should
-    /// carry one. A test seam: the binary never uses it, and the fixture tests
-    /// build their hermetic runner with it.
+    /// `GIT_*` settings apply. For a hermetic run: a test over fixture repos,
+    /// or a caller that must not depend on the user's git setup. The system
+    /// config still applies unless `env` sets `GIT_CONFIG_NOSYSTEM`. git and
+    /// its own children (ssh, `!` aliases, hooks) all search `env`'s `PATH`,
+    /// never the caller's, so `env` should carry one.
     pub const fn with_clean_env(env: Vec<(OsString, OsString)>) -> Self {
         Self {
             spawns: AtomicU32::new(0),
@@ -284,7 +338,7 @@ impl Git {
     }
 
     /// Whether the environment git sees already configures its SSH.
-    pub(crate) fn env_configures_ssh(&self) -> bool {
+    pub fn env_configures_ssh(&self) -> bool {
         ["GIT_SSH_COMMAND", "GIT_SSH"]
             .iter()
             .any(|v| self.env_var(v).is_some())
@@ -296,7 +350,7 @@ impl Git {
     /// # Errors
     ///
     /// When git can't be spawned, times out, or overflows the stdout cap.
-    pub(crate) fn run(
+    pub fn run(
         &self,
         dir: &Path,
         args: &[&str],
@@ -331,7 +385,7 @@ impl Git {
     /// userinfo; otherwise as
     /// `output`, including `Failed` with git's stderr when the read is
     /// refused.
-    pub(crate) fn ls_remote_anonymous(&self, dir: &Path, url: &str) -> Result<(), GitError> {
+    pub fn ls_remote_anonymous(&self, dir: &Path, url: &str) -> Result<(), GitError> {
         let args = anonymous_args(url);
         let (cmd, timeout) = self.anonymous_command(dir, url)?;
         let out = self.spawn_wait(cmd, timeout, None, || args.join(" "))?;
@@ -479,34 +533,28 @@ impl Git {
     ///
     /// # Errors
     ///
-    /// `GitNotFound` when git isn't on `PATH`; `GitTooOld` when its version
-    /// is older or unrecognized — the runner can't vouch for a git it can't
+    /// `NotFound` when git isn't on `PATH`; `TooOld` when its version is
+    /// older or unrecognized — the runner can't vouch for a git it can't
     /// place — or when git rejects the runner's own flags (git before 2.15
-    /// has no `--no-optional-locks`); `Io` when `git --version` otherwise
+    /// has no `--no-optional-locks`); `Run` when `git --version` otherwise
     /// fails.
-    pub(crate) fn check_version(&self, dir: &Path) -> crate::error::Result<GitVersion> {
-        use crate::error::Error;
+    pub fn check_version(&self, dir: &Path) -> Result<GitVersion, VersionError> {
         let out = match self.output_string(dir, &["--version"], CallOptions::default()) {
             Ok(out) => out,
-            Err(GitError::NotFound) => return Err(Error::GitNotFound),
+            Err(GitError::NotFound) => return Err(VersionError::NotFound),
             Err(GitError::Failed { stderr, .. })
                 if stderr.to_ascii_lowercase().starts_with("unknown option") =>
             {
-                return Err(Error::GitTooOld {
+                return Err(VersionError::TooOld {
                     found: FOUND_PRE_OPTIONAL_LOCKS.into(),
                     required: MIN_GIT_VERSION,
                 });
             }
-            Err(e) => {
-                return Err(Error::Io {
-                    context: "failed to run git --version".into(),
-                    source: io::Error::other(e),
-                });
-            }
+            Err(e) => return Err(VersionError::Run(e)),
         };
         match GitVersion::parse(&out) {
             Some(v) if v >= MIN_GIT_VERSION => Ok(v),
-            parsed => Err(Error::GitTooOld {
+            parsed => Err(VersionError::TooOld {
                 found: parsed.map_or_else(|| describe_version(&out), |v| v.to_string()),
                 required: MIN_GIT_VERSION,
             }),
@@ -518,7 +566,7 @@ impl Git {
     /// # Errors
     ///
     /// As `run`, plus `Failed` on a non-zero exit.
-    pub(crate) fn output(
+    pub fn output(
         &self,
         dir: &Path,
         args: &[&str],
@@ -541,7 +589,7 @@ impl Git {
     /// # Errors
     ///
     /// As `output`, plus `NonUtf8`.
-    pub(crate) fn output_string(
+    pub fn output_string(
         &self,
         dir: &Path,
         args: &[&str],
@@ -565,7 +613,7 @@ const fn anonymous_args(url: &str) -> [&str; 6] {
     ]
 }
 
-/// `GitTooOld`'s `found` for a git that rejects `--no-optional-locks`, the
+/// `VersionError::TooOld`'s `found` for a git that rejects `--no-optional-locks`, the
 /// runner's first flag, before it can print its version.
 const FOUND_PRE_OPTIONAL_LOCKS: &str = "unknown (older than 2.15)";
 

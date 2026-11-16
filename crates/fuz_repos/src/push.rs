@@ -92,10 +92,11 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
+use fuz_git::Git;
+
 use crate::classify::{NeedsHuman, Refresh};
 use crate::discover::{Locate, PathTarget, Workspace, resolve_push_targets};
 use crate::error::{Error, Result};
-use crate::git::Git;
 use crate::lfs::LfsScan;
 use crate::probe::RepoFacts;
 use crate::registry::{Entry, RegistryDirs};

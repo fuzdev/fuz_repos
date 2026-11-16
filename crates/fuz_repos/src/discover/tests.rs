@@ -1,6 +1,31 @@
 use std::os::unix::fs::PermissionsExt as _;
 
+use fuz_git::MIN_GIT_VERSION;
+
 use super::*;
+
+#[test]
+fn version_failures_map_to_the_run_errors() {
+    assert!(matches!(
+        version_error(VersionError::NotFound),
+        Error::GitNotFound
+    ));
+    let too_old = version_error(VersionError::TooOld {
+        found: "2.30.0".into(),
+        required: MIN_GIT_VERSION,
+    });
+    assert!(matches!(
+        &too_old,
+        Error::GitTooOld { found, required } if found == "2.30.0" && *required == MIN_GIT_VERSION
+    ));
+    let run = version_error(VersionError::Run(GitError::NotFound));
+    assert!(matches!(
+        &run,
+        Error::Io { context, .. } if context == "failed to run git --version"
+    ));
+    // the cause stays in the chain for the printed report
+    assert!(std::error::Error::source(&run).is_some());
+}
 
 #[test]
 fn walks_up_to_the_first_registry() {

@@ -15,7 +15,8 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::thread;
 
-use fuz_repos::git::Git;
+use fuz_git::Git;
+
 use fuz_repos::remote::{RemoteFailure, UnreachableCause, VisibilityCheck};
 use fuz_repos::state::Presence;
 use support::{FixtureWorkspace, OWNER, find_entry};

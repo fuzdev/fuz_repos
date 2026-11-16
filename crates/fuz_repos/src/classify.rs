@@ -8,6 +8,7 @@
 
 use std::path::Path;
 
+use fuz_git::url::{RemoteParts, remote_parts, without_userinfo};
 use serde::Serialize;
 
 use crate::busy::{Detection, EntrySessions};
@@ -23,7 +24,6 @@ use crate::state::{
     CloneVerdict, Head, InProgressOp, Prune, PruneLoss, RefreshHold, RefreshVerdict, Relation,
     SyncAction, Uncommitted, UnprobedWhy, UnprobedWorktree, UnprobedWorktreeStatus, Verdict,
 };
-use crate::url::{RemoteParts, remote_parts, without_userinfo};
 
 /// Why `sync` would stop on an entry and leave it to a person. Branch-level
 /// reasons are on each branch's `Verdict`.

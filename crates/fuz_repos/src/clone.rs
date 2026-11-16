@@ -74,8 +74,9 @@ use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use fuz_git::{CallOptions, Git, GitError, NetworkOptions};
+
 use crate::classify::Refresh;
-use crate::git::{CallOptions, Git, GitError, NetworkOptions};
 use crate::probe::{ProbeContext, Probed, RepoFetches, probe};
 use crate::registry::{Entry, RegistryDirs};
 use crate::remote::{RefspecContext, RemoteFailure};

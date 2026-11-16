@@ -276,12 +276,13 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::time::{Duration, Instant};
 
+use fuz_git::Git;
+
 use crate::busy::{Detection, EntryCheckouts, any_session_under, scope_sessions};
 use crate::classify::{Refresh, push_target};
 use crate::clone::{CLONE_TIMEOUT, Cloner};
 use crate::discover::{Locate, Workspace, resolve_targets};
 use crate::error;
-use crate::git::Git;
 use crate::porcelain::RefFacts;
 use crate::probe::RepoFacts;
 use crate::registry::{Entry, RegistryDirs};

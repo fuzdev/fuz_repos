@@ -17,12 +17,12 @@
 
 use std::path::Path;
 
+use fuz_git::url::{escape_ere, url_origin};
+use fuz_git::{Git, GitError};
 use serde::Serialize;
 
-use crate::git::{Git, GitError};
 use crate::porcelain::ConfigValue;
 use crate::registry::{Entry, EntryKind, Visibility};
-use crate::url::{escape_ere, url_origin};
 
 /// Why a call to a remote failed.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]

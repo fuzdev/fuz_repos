@@ -125,7 +125,7 @@ impl TryFrom<String> for RepoUrl {
 
     fn try_from(s: String) -> std::result::Result<Self, String> {
         // never echo credentials back
-        let shown = crate::url::without_userinfo(&s);
+        let shown = fuz_git::url::without_userinfo(&s);
         let invalid =
             |why: &str| format!("`{shown}` is not an `https://<host>/<account>/<name>` URL: {why}");
         let rest = s
@@ -147,7 +147,7 @@ impl TryFrom<String> for RepoUrl {
                 "it must have exactly a host, an account, and a name",
             ));
         };
-        if !crate::url::is_plain_host(host) {
+        if !fuz_git::url::is_plain_host(host) {
             return Err(invalid(
                 "the host must be a plain DNS name (no port, credentials, or brackets)",
             ));
@@ -368,7 +368,7 @@ impl Registry {
         Self::parse(&src).map_err(|e| Error::RegistryParse {
             path: path.to_owned(),
             // the parser quotes the offending line, credentials and all
-            message: crate::url::redact_userinfo_in(&e.to_string()),
+            message: fuz_git::url::redact_userinfo_in(&e.to_string()),
         })
     }
 

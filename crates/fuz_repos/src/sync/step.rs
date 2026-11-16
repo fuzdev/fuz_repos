@@ -6,8 +6,9 @@
 use std::path::Path;
 use std::time::Duration;
 
+use fuz_git::{CallOptions, Git, GitError, GitOutput, NetworkOptions};
+
 use crate::classify::{lazy_transport, origin_matches, push_urls_match};
-use crate::git::{CallOptions, Git, GitError, GitOutput, NetworkOptions};
 use crate::porcelain::{self, ConfigFacts};
 use crate::probe::{
     ConfigReadError, STATUS_ARGS, read_config, read_fetch_url, read_push_urls, read_shallow_roots,

@@ -233,7 +233,8 @@ folded, a `.git` or trailing `/` dropped — an `@` past the host, an escape
 a user other than ASCII letters, digits, and `._+-`, or an IP literal never
 matches.
 
-The details live in the rustdoc of `remote.rs`, `probe.rs`, and `url.rs`.
+The details live in the rustdoc of `remote.rs` and `probe.rs`, and of the
+`fuz_git` crate's `url.rs`.
 
 ## Busy detection
 

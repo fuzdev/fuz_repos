@@ -1,9 +1,10 @@
 //! The hand-built documents the goldens serialize: each report, outcome, and
 //! error document, over the fixed clock and workspace.
 
+use fuz_git::MIN_GIT_VERSION;
+
 use fuz_repos::classify::{NeedsHuman, OriginByHand, OriginFix, OriginRemote, Primary, at_rest};
 use fuz_repos::error::Error;
-use fuz_repos::git::MIN_GIT_VERSION;
 use fuz_repos::registry::{CheckoutList, EntryKind, EntryName, RegistryIssue, Visibility};
 use fuz_repos::remote::{RefGoneFix, RemoteFailure, UnreachableCause, VisibilityCheck};
 use fuz_repos::report::{

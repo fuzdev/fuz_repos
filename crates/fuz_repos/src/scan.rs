@@ -38,9 +38,11 @@ use std::ffi::{OsStr, OsString};
 use std::io;
 use std::path::{Path, PathBuf};
 
+use fuz_git::url::without_userinfo;
+use fuz_git::{CallOptions, Git};
+
 use crate::classify::remote_account;
 use crate::clone::is_temp_dir_name;
-use crate::git::{CallOptions, Git};
 use crate::gitdir::{
     GitdirTarget, dot_git_target, read_commondir, read_gitdir_target, read_worktree_git_dirs,
 };
@@ -48,7 +50,6 @@ use crate::paths::canonical;
 use crate::porcelain::after_last_reset;
 use crate::registry::{Entry, is_owner};
 use crate::report::{RepairBlock, UnregisteredClone, UnregisteredKind};
-use crate::url::without_userinfo;
 
 /// What the unregistered scan found.
 #[derive(Debug)]

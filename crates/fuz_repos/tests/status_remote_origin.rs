@@ -5,8 +5,9 @@ mod support;
 use std::ffi::OsString;
 use std::path::Path;
 
+use fuz_git::Git;
+
 use fuz_repos::classify::{OriginByHand, OriginFix, OriginRemote};
-use fuz_repos::git::Git;
 use fuz_repos::remote::{RefGoneFix, RemoteFailure};
 use fuz_repos::state::{Presence, ProbeErrorKind};
 use support::remote::drift;

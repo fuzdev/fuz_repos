@@ -3,7 +3,7 @@
 //!
 //! **Load a registry, get a report.** Each command is one call:
 //! `status::status_report`, `sync::sync_report`, and `push::push_report`
-//! take a git runner (`git::Git`), the cwd, where the registry is
+//! take a git runner (`fuz_git::Git`), the cwd, where the registry is
 //! (`discover::Locate`; the default finds it walking up from the cwd), the
 //! targets, and the command's options, and return the finished document
 //! `repos --json` prints (`report::StatusReport`, `SyncReport`,
@@ -23,8 +23,9 @@
 //! Claude Code sessions busy detection reads (`sessions`). The report's
 //! vocabulary is `report`, `state`, `classify` (entry-level reasons,
 //! `Refresh`), `remote` (what a remote's answers mean), and `error`. The
-//! probe, busy detection's scoping, URL parsing and redaction (`url`), path
-//! resolution (`paths`), and git's files and output formats are private.
+//! probe, busy detection's scoping, path resolution (`paths`), and git's
+//! files and output formats are private. The git runner and URL redaction
+//! are the `fuz_git` crate's.
 //! The `repos` binary parses arguments, renders reports, and owns exit
 //! codes.
 //!
@@ -58,7 +59,6 @@ pub mod classify;
 pub mod clone;
 pub mod discover;
 pub mod error;
-pub mod git;
 mod gitdir;
 mod lfs;
 mod paths;
@@ -74,7 +74,6 @@ pub mod sessions;
 pub mod state;
 pub mod status;
 pub mod sync;
-mod url;
 
 /// The version of the `repos status --json` document. Bumped on any change
 /// to its shape, new fields and variants included: consumers parse it with

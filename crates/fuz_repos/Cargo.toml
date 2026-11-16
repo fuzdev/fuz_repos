@@ -15,6 +15,7 @@ path = "src/bin/repos/main.rs"
 
 [dependencies]
 argh.workspace = true
+fuz_git.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

@@ -7,7 +7,14 @@ use std::process::Command;
 
 /// What the binary is built from: the dirty check and the rerun watch cover
 /// the same paths, so the stamp can't go stale on an edit it counts.
-const SOURCES: [&str; 3] = ["src", "build.rs", "Cargo.toml"];
+const SOURCES: [&str; 5] = [
+    "src",
+    "build.rs",
+    "Cargo.toml",
+    // the git runner, which the binary is built on
+    "../fuz_git/src",
+    "../fuz_git/Cargo.toml",
+];
 
 fn main() {
     let stamp = git(&["rev-parse", "--short=12", "HEAD"]).map_or_else(

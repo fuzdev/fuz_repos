@@ -2,9 +2,8 @@
 //! credential, found and redacted, and a remote URL's host and path as git
 //! connects for it (`remote_parts`).
 //!
-//! For the registry parser, the runner's anonymous read, classification,
-//! and the scan alike. Pure string work; no URL here is fetched or
-//! resolved.
+//! Pure string work, so a URL can be checked, compared, and shown without
+//! a credential reaching the output; none is fetched or resolved.
 
 use std::borrow::Cow;
 
@@ -44,8 +43,11 @@ pub fn is_plain_host(host: &str) -> bool {
 /// `.git` dropped), read structurally (`remote_parts`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RemoteParts<'a> {
+    /// The host git connects to, without userinfo or port.
     pub host: &'a str,
+    /// The port, when the URL names one.
     pub port: Option<&'a str>,
+    /// The path on the host, trailing `/`s and one `.git` dropped.
     pub path: &'a str,
     /// Reached over SSH: an `ssh://` URL (or git's `git+ssh://` and
     /// `ssh+git://` spellings), or scp-like syntax.

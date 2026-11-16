@@ -5,9 +5,10 @@
 
 use std::path::{Path, PathBuf};
 
+use fuz_git::Git;
+
 use super::super::tests::{Repo, step, write_executable};
 use super::*;
-use crate::git::Git;
 
 /// `main` with two commits `onto` doesn't have: `(onto, from)`.
 fn diverged(repo: &Repo) -> (String, String) {

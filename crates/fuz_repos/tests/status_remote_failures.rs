@@ -13,8 +13,9 @@ use std::ffi::OsString;
 use std::path::Path;
 use std::time::{Duration, UNIX_EPOCH};
 
+use fuz_git::Git;
+
 use fuz_repos::classify::{NeedsHuman, OriginFix, OriginRemote};
-use fuz_repos::git::Git;
 use fuz_repos::remote::{RefGoneFix, RemoteFailure, UnreachableCause};
 use fuz_repos::state::{Presence, Relation};
 use support::{FixtureWorkspace, OWNER, branch, find_entry};

@@ -78,10 +78,10 @@ use std::process::{Command, Output, Stdio};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, SystemTime};
 
+use fuz_git::Git;
 use fuz_repos::classify::Refresh;
 use fuz_repos::clone::CLONE_TIMEOUT;
 use fuz_repos::discover::{Locate, REGISTRY_FILE, find_registry, resolve_push_targets};
-use fuz_repos::git::Git;
 use fuz_repos::push::{PushOptions, PushReportOptions, PushRun, check_pushable, push, push_report};
 use fuz_repos::registry::{Entry, RegistryDirs, ValidRegistry};
 use fuz_repos::report::{EntryStatus, StatusReport, UnregisteredClone};

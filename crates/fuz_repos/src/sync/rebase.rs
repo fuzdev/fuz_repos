@@ -5,8 +5,9 @@
 
 use std::path::Path;
 
+use fuz_git::CallOptions;
+
 use super::step::{CHECKOUT_TIMEOUT, Step, UpdateDone, first_message};
-use crate::git::CallOptions;
 use crate::probe::{merges_args, tagged_args};
 use crate::report::{BranchSyncHold, RebaseRefusal};
 

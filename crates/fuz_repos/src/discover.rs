@@ -4,12 +4,26 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
+use fuz_git::{CallOptions, Git, GitError, VersionError};
+
 use crate::classify::origin_matches;
 use crate::error::{Error, Result};
-use crate::git::{CallOptions, Git, GitError};
 use crate::gitdir::dot_git_target;
 use crate::paths::same_canonical;
 use crate::registry::{Entry, RegistryDirs, ValidRegistry};
+
+/// Maps the runner's version failure to the run-stopping error, whose text
+/// the user sees.
+fn version_error(e: VersionError) -> Error {
+    match e {
+        VersionError::NotFound => Error::GitNotFound,
+        VersionError::TooOld { found, required } => Error::GitTooOld { found, required },
+        VersionError::Run(e) => Error::Io {
+            context: "failed to run git --version".into(),
+            source: std::io::Error::other(e),
+        },
+    }
+}
 
 /// The registry's file name, found by walking up from the cwd.
 pub const REGISTRY_FILE: &str = "repos.toml";
@@ -46,7 +60,7 @@ impl Workspace {
     /// then what `find_registry` and `ValidRegistry::load` return, and
     /// `RootInEntry`.
     pub fn load(git: &Git, cwd: &Path, start: &Path, locate: Locate<'_>) -> Result<Self> {
-        git.check_version(cwd)?;
+        git.check_version(cwd).map_err(version_error)?;
         let registry = locate.registry.map(|r| cwd.join(r));
         let root = locate.root.map(|r| cwd.join(r));
         let location = find_registry(start, registry.as_deref(), root.as_deref(), git)?;

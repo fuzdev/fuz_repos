@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/fuz_repos"]
+members = ["crates/fuz_git", "crates/fuz_repos"]
 
 [workspace.package]
 version = "0.0.1"
@@ -9,6 +9,7 @@ license = "0BSD"
 publish = false
 
 [workspace.dependencies]
+fuz_git = { path = "crates/fuz_git" }
 argh = "0.1"
 thiserror = "2"
 serde = { version = "1", features = ["derive"] }

@@ -27,7 +27,7 @@
 
 use std::path::Path;
 
-use crate::git::{CallOptions, Git, GitError};
+use fuz_git::{CallOptions, Git, GitError};
 
 /// The size Git LFS's scanner reads pointers under (its `blobSizeCutoff`):
 /// a blob this size or larger is content, never a pointer.

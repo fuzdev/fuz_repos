@@ -17,8 +17,9 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant, UNIX_EPOCH};
 
+use fuz_git::{CallOptions, Git, GitError, NetworkOptions};
+
 use crate::classify::{Refresh, fetch_url_mismatch, refresh_intent, refresh_verdict};
-use crate::git::{CallOptions, Git, GitError, NetworkOptions};
 use crate::gitdir::{
     GitdirTarget, WorktreeGitDir, dot_git_target, read_head, read_worktree_git_dirs,
 };

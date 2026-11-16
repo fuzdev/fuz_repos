@@ -50,9 +50,9 @@ use std::process::ExitCode;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use argh::{EarlyExit, FromArgs};
+use fuz_git::Git;
 use fuz_repos::discover::Locate;
 use fuz_repos::error::{Error, Result};
-use fuz_repos::git::Git;
 use fuz_repos::push::{PushReportOptions, push_report};
 use fuz_repos::report::ErrorReport;
 use fuz_repos::sessions::{Caller, SessionsSource};

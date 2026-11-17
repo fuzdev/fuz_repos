@@ -5,7 +5,7 @@
 
 use std::borrow::Cow;
 use std::fmt::Write as _;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use fuz_git::{GitVersion, MIN_GIT_VERSION};
 use serde::Serialize;
@@ -41,6 +41,27 @@ pub enum Error {
         root: PathBuf,
         registry: PathBuf,
         key: String,
+    },
+    /// The root found walking up has a symlink as its own `.git`, or the
+    /// root is under one and `linked` names the registry above it
+    /// (`check_discovered_root`): git, run there, would follow it, so
+    /// whether the root is a checkout is unknown — and with `linked`, the
+    /// symlink is what kept the walk from rooting the workspace at the link.
+    #[error(
+        "the registry found at {} would root the workspace at {}, {}",
+        registry.display(),
+        root.display(),
+        git_symlink_clause(git, linked.as_deref())
+    )]
+    RootGitSymlink {
+        root: PathBuf,
+        registry: PathBuf,
+        /// The symlinked `.git`: the root's own, or with `linked` the
+        /// nearest one above it.
+        git: PathBuf,
+        /// The `repos.toml` above `git`'s repo that names the registry,
+        /// when the root's own `.git` isn't the symlink.
+        linked: Option<PathBuf>,
     },
     /// The registry exists but couldn't be read.
     #[error("failed to read the registry at {}", path.display())]
@@ -112,6 +133,7 @@ impl Error {
             | Self::RootNotFound { .. }
             | Self::RegistryNotFound { .. }
             | Self::RootInEntry { .. }
+            | Self::RootGitSymlink { .. }
             | Self::RegistryRead { .. }
             | Self::RegistryParse { .. }
             | Self::RegistryInvalid { .. }
@@ -142,6 +164,11 @@ impl Error {
             Self::RootInEntry { .. } => {
                 "run from the workspace root, link the registry there (a repos.toml \
                  symlink to it), or pass `--root <dir>` or `--registry <path>`"
+            }
+            Self::RootGitSymlink { .. } => {
+                "run from the workspace root, or pass `--root <dir>` or `--registry <path>`: \
+                 a repo whose .git is a symlink is no checkout to discovery, so no link \
+                 above it roots the workspace"
             }
             Self::GitNotFound => {
                 // the floor is a minor release, so its patch goes unsaid
@@ -204,6 +231,7 @@ impl Error {
             Self::RootNotFound { .. } => ErrorKind::RootNotFound,
             Self::RegistryNotFound { .. } => ErrorKind::RegistryNotFound,
             Self::RootInEntry { key, .. } => ErrorKind::RootInEntry { key: key.clone() },
+            Self::RootGitSymlink { .. } => ErrorKind::RootGitSymlink,
             Self::RegistryRead { .. } => ErrorKind::RegistryRead,
             Self::RegistryParse { .. } => ErrorKind::RegistryParse,
             Self::RegistryInvalid { issues, .. } => ErrorKind::RegistryInvalid {
@@ -244,6 +272,7 @@ pub enum ErrorKind {
     RootInEntry {
         key: String,
     },
+    RootGitSymlink,
     RegistryRead,
     RegistryParse,
     /// Every integrity issue found, each tagged by its own `kind`.
@@ -283,6 +312,21 @@ fn issue_lines(issues: &[RegistryIssue]) -> String {
     out
 }
 
+/// How `Error::RootGitSymlink` names its symlink: the root's own `.git`,
+/// or one above it with the registry linked further up.
+fn git_symlink_clause(git: &Path, linked: Option<&Path>) -> String {
+    linked.map_or_else(
+        || format!("whose .git ({}) is a symlink", git.display()),
+        |link| {
+            format!(
+                "though {} links it above, past a symlinked .git ({})",
+                link.display(),
+                git.display()
+            )
+        },
+    )
+}
+
 /// Result alias for the crate.
 pub type Result<T> = std::result::Result<T, Error>;
 
@@ -305,6 +349,12 @@ mod tests {
                 root: PathBuf::from("/x/meta"),
                 registry: PathBuf::from("/x/meta/repos.toml"),
                 key: "meta".into(),
+            },
+            Error::RootGitSymlink {
+                root: PathBuf::from("/x/meta"),
+                registry: PathBuf::from("/x/meta/repos.toml"),
+                git: PathBuf::from("/x/meta/.git"),
+                linked: None,
             },
             Error::RegistryParse {
                 path: PathBuf::from("/x/repos.toml"),
@@ -437,6 +487,44 @@ mod tests {
              checkout of entry `meta`"
         );
         assert!(root_in_entry.hint().is_some_and(|h| h.contains("--root")));
+        let root_git_symlink = Error::RootGitSymlink {
+            root: PathBuf::from("/x/meta"),
+            registry: PathBuf::from("/x/meta/repos.toml"),
+            git: PathBuf::from("/x/meta/.git"),
+            linked: None,
+        };
+        assert_eq!(
+            json(&root_git_symlink),
+            serde_json::json!({"kind": "root_git_symlink"})
+        );
+        assert_eq!(
+            root_git_symlink.message(),
+            "the registry found at /x/meta/repos.toml would root the workspace at /x/meta, whose \
+             .git (/x/meta/.git) is a symlink"
+        );
+        assert!(
+            root_git_symlink
+                .hint()
+                .is_some_and(|h| h.contains("--root"))
+        );
+        // the registry linked above a repo whose `.git` is the symlink:
+        // the same kind, no new field
+        let linked_past = Error::RootGitSymlink {
+            root: PathBuf::from("/x/meta/cfg"),
+            registry: PathBuf::from("/x/meta/cfg/repos.toml"),
+            git: PathBuf::from("/x/meta/.git"),
+            linked: Some(PathBuf::from("/x/repos.toml")),
+        };
+        assert_eq!(
+            json(&linked_past),
+            serde_json::json!({"kind": "root_git_symlink"})
+        );
+        assert_eq!(
+            linked_past.message(),
+            "the registry found at /x/meta/cfg/repos.toml would root the workspace at \
+             /x/meta/cfg, though /x/repos.toml links it above, past a symlinked .git \
+             (/x/meta/.git)"
+        );
         assert_eq!(
             json(&Error::ReferencesWithTargets),
             serde_json::json!({"kind": "references_with_targets"})

@@ -1,5 +1,5 @@
 {
-	"version": 20,
+	"version": 21,
 	"error": {
 		"kind": "git_too_old",
 		"found": "2.39.5",

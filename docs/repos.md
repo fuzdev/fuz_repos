@@ -78,9 +78,14 @@ UPDATE_GOLDEN=1 cargo test --test golden # regenerate the --json golden fixtures
 the first `repos.toml` (from a linked worktree outside the workspace, it walks
 up from the repo's main checkout instead), and the **workspace root is the
 directory holding it as found** — entry dirs resolve against that root —
-except inside a checkout (the nearest `.git` at or above it): there the root
-is the nearest directory above that checkout whose `repos.toml` is the same
-file (same device and inode, through symlinks; unreadable ones passed over).
+except inside a checkout (the nearest dir at or above it whose `.git` is a
+directory or regular file by `lstat` — a symlinked `.git`, or any other kind,
+makes no checkout and is passed over): there the root is the nearest directory
+above that checkout whose `repos.toml` is the same file (same device and
+inode, through symlinks; unreadable ones passed over). No git call discovery
+makes goes through a symlinked `.git`: none runs in a dir whose own `.git` is
+one, and git's own search stops below the nearest one above (its
+`GIT_CEILING_DIRECTORIES`; none runs when that dir's path holds a `:`).
 
 So a registry kept in one of the workspace's own repos, with a `repos.toml`
 symlink to it at the workspace root, roots the workspace at the link's dir
@@ -92,9 +97,22 @@ root it, and a different registry above neither roots nor stops the search.
 A root found this way that is still in a checkout whose `origin` names one of
 the registry's entries (no link at the root yet, say) is refused
 (`root_in_entry`, exit `2`) — rooted there, a sync would clone the fleet into
-that checkout. `--registry` naming a file makes _its_ directory the root as
-given, with no search or check, unless `--root <dir>` names it; `--root`
-alone skips the check too.
+that checkout. So is one whose own `.git` is a symlink (by `lstat`;
+`root_git_symlink`, exit `2`): the repo there is no checkout to discovery, so
+no link above it roots the workspace, and git run there would follow the link
+— the symlink is read without git. A symlinked `.git` further up (a dotfiles
+repo's at `$HOME`, or the repo's when the registry sits in a subdirectory of
+it) is passed over, and the root runs — unless it is the nearest `.git` above
+the root (a FIFO or other special file skipped, as discovery skips it) and a `repos.toml` above its repo is the registry's file, as a link
+at the workspace root is for a registry kept in `meta/cfg/`: the symlink is
+what kept the walk from that link, so that is refused too (`root_git_symlink`).
+The gap left: a registry not linked above that repo (unlinked, or linked only
+from inside it) in a subdirectory of a repo whose `.git` is a symlink still runs from inside that subdirectory, and a sync there clones
+into the checkout — without running git through the symlink, it can't be told
+apart from a workspace under a dotfiles `$HOME`.
+`--registry` naming a file makes _its_ directory the root as given, with no
+search or check, unless `--root <dir>` names it; `--root` alone skips the
+check too.
 
 ## `repos status`
 
@@ -679,7 +697,7 @@ The rustdoc of `clone.rs` has the recipe.
   fatal I/O error
 - `2` when the caller must change something — usage, a missing or invalid
   registry, git missing or too old, an unknown target, a refused root
-  (`root_in_entry`), and `push`'s usage cases
+  (`root_in_entry`, `root_git_symlink`), and `push`'s usage cases
 
 A fatal error prints `error: …` and `hint: …` on stderr; under `--json` it
 also prints one error document on stdout, in place of the report — except a usage

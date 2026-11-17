@@ -409,6 +409,114 @@ fn a_root_found_in_an_entrys_checkout_is_refused() {
 }
 
 #[test]
+fn a_root_whose_own_git_is_a_symlink_is_refused() {
+    let (ws, meta) = registry_repo_workspace(false);
+    // `meta`'s git dir moved out and linked back: discovery sees no
+    // checkout, so from inside `meta` the root would be `meta`
+    let store = ws.outside("meta-git");
+    std::fs::rename(meta.join(".git"), &store).unwrap();
+    std::os::unix::fs::symlink(&store, meta.join(".git")).unwrap();
+    let deeper = meta.join("src");
+    std::fs::create_dir(&deeper).unwrap();
+
+    for cwd in [&meta, &deeper] {
+        let error = error_doc(&repos(&ws, cwd, &["status", "--json"]), 2);
+        assert_eq!(error["kind"], "root_git_symlink");
+        assert_eq!(
+            error["message"],
+            format!(
+                "the registry found at {m}/repos.toml would root the workspace at {m}, whose \
+                 .git ({m}/.git) is a symlink",
+                m = meta.display()
+            )
+        );
+        let out = repos(&ws, cwd, &["status"]);
+        assert_eq!(out.status.code(), Some(2));
+        assert!(
+            stderr(&out).contains("hint: run from the workspace root"),
+            "{}",
+            stderr(&out)
+        );
+        // sync would clone the fleet into it
+        let out = repos(&ws, cwd, &["sync", "--json"]);
+        assert_eq!(out.status.code(), Some(2), "stderr: {}", stderr(&out));
+        let doc: Value = serde_json::from_str(&stdout(&out)).unwrap();
+        assert_eq!(doc["error"]["kind"], "root_git_symlink");
+    }
+    assert!(!meta.join("app").exists());
+
+    // named, it runs; from the root, it roots there
+    let root = ws.root().to_str().unwrap().to_owned();
+    let (workspace, _, _) = discovered(&ws, &meta, &["--root", &root, "status", "--json"]);
+    assert_eq!(workspace, root);
+    let (workspace, _, _) = discovered(&ws, &ws.root(), &["status", "--json"]);
+    assert_eq!(workspace, root);
+}
+
+#[test]
+fn a_registry_below_the_top_of_a_repo_with_a_symlinked_git_linked_above_is_refused() {
+    // the `cfg/` layout, `meta`'s git dir moved out and linked back:
+    // discovery sees no checkout, so from inside `meta/cfg` the walk never
+    // reaches the link at the root, and the root would be `meta/cfg`
+    let (ws, meta) = registry_repo_workspace_in(true, "cfg");
+    let cfg = meta.join("cfg");
+    let store = ws.outside("meta-git");
+    std::fs::rename(meta.join(".git"), &store).unwrap();
+    std::os::unix::fs::symlink(&store, meta.join(".git")).unwrap();
+    let deeper = cfg.join("deep");
+    std::fs::create_dir(&deeper).unwrap();
+
+    for cwd in [&cfg, &deeper] {
+        let error = error_doc(&repos(&ws, cwd, &["status", "--json"]), 2);
+        assert_eq!(error["kind"], "root_git_symlink");
+        assert_eq!(
+            error["message"],
+            format!(
+                "the registry found at {c}/repos.toml would root the workspace at {c}, though \
+                 {r}/repos.toml links it above, past a symlinked .git ({m}/.git)",
+                c = cfg.display(),
+                r = ws.root().display(),
+                m = meta.display()
+            )
+        );
+        // sync would clone the fleet into it
+        let out = repos(&ws, cwd, &["sync", "--json"]);
+        assert_eq!(out.status.code(), Some(2), "stderr: {}", stderr(&out));
+        let doc: Value = serde_json::from_str(&stdout(&out)).unwrap();
+        assert_eq!(doc["error"]["kind"], "root_git_symlink");
+    }
+    assert!(!cfg.join("app").exists());
+    assert!(!cfg.join("meta").exists());
+
+    // from the root, it roots there
+    let root = ws.root().to_str().unwrap().to_owned();
+    let (workspace, _, _) = discovered(&ws, &ws.root(), &["status", "--json"]);
+    assert_eq!(workspace, root);
+}
+
+#[test]
+fn a_root_under_a_symlinked_git_runs() {
+    // a dotfiles-style repo further out whose `.git` is a symlink: only the
+    // root's own `.git` is read, so the workspace runs
+    let ws = workspace();
+    let root = ws.root().to_str().unwrap().to_owned();
+    let store = ws.outside("dots.git");
+    ws.git(
+        ws.base(),
+        &["init", "-q", "--bare", store.to_str().unwrap()],
+    );
+    ws.git(
+        &store,
+        &["remote", "add", "origin", "git@github.com:me/dotfiles"],
+    );
+    std::os::unix::fs::symlink(&store, ws.base().join(".git")).unwrap();
+    for cwd in [ws.root(), ws.dir("app")] {
+        let (workspace, _, _) = discovered(&ws, &cwd, &["status", "--json"]);
+        assert_eq!(workspace, root);
+    }
+}
+
+#[test]
 fn a_root_in_a_checkout_of_no_entry_runs() {
     let ws = workspace();
     let root = ws.root().to_str().unwrap().to_owned();

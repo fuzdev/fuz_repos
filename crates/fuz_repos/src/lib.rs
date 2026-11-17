@@ -84,14 +84,14 @@ pub mod sync;
 /// The version of the `repos status --json` document. Bumped on any change
 /// to its shape, new fields and variants included: consumers parse it with
 /// strict objects and closed unions.
-pub const STATUS_FORMAT_VERSION: u32 = 20;
+pub const STATUS_FORMAT_VERSION: u32 = 21;
 
 /// The version of the `repos sync --json` document. Bumped on any change to
 /// its shape, the embedded status report's included (so with every
 /// `STATUS_FORMAT_VERSION` bump).
-pub const SYNC_FORMAT_VERSION: u32 = 14;
+pub const SYNC_FORMAT_VERSION: u32 = 15;
 
 /// The version of the `repos push --json` document. Bumped on any change to
 /// its shape, the embedded status report's included (so with every
 /// `STATUS_FORMAT_VERSION` bump).
-pub const PUSH_FORMAT_VERSION: u32 = 12;
+pub const PUSH_FORMAT_VERSION: u32 = 13;

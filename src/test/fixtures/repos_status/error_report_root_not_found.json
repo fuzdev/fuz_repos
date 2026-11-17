@@ -1,5 +1,5 @@
 {
-	"version": 20,
+	"version": 21,
 	"error": {
 		"kind": "root_not_found",
 		"message": "no workspace root at /home/me/nowhere",

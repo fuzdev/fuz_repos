@@ -1,0 +1,8 @@
+{
+	"version": 21,
+	"error": {
+		"kind": "root_git_symlink",
+		"message": "the registry found at /home/me/dev/meta/repos.toml would root the workspace at /home/me/dev/meta, whose .git (/home/me/dev/meta/.git) is a symlink",
+		"hint": "run from the workspace root, or pass `--root <dir>` or `--registry <path>`: a repo whose .git is a symlink is no checkout to discovery, so no link above it roots the workspace"
+	}
+}

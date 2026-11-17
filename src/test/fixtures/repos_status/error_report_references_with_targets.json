@@ -1,5 +1,5 @@
 {
-	"version": 20,
+	"version": 21,
 	"error": {
 		"kind": "references_with_targets",
 		"message": "--references takes no targets",

@@ -1355,6 +1355,12 @@ pub fn status_errors() -> Vec<Error> {
             registry: PathBuf::from(path("meta/repos.toml")),
             key: "meta".into(),
         },
+        Error::RootGitSymlink {
+            root: PathBuf::from(path("meta")),
+            registry: PathBuf::from(path("meta/repos.toml")),
+            git: PathBuf::from(path("meta/.git")),
+            linked: None,
+        },
         Error::RegistryRead {
             path: registry(),
             source: denied(),

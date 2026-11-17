@@ -52,14 +52,15 @@ impl Workspace {
     /// Checks that git is there and new enough, finds the registry
     /// (`find_registry`: walking up from `start`, unless `locate` names it,
     /// relative to `cwd`), loads and validates it, and refuses a root
-    /// found walking up that is an entry's checkout
-    /// (`check_discovered_root`).
+    /// found walking up whose own `.git` is a symlink, or that a symlinked
+    /// `.git` kept from the registry's link above, or that is an entry's
+    /// checkout (`check_discovered_root`).
     ///
     /// # Errors
     ///
     /// `GitNotFound` or `GitTooOld` first, since discovery runs git too;
     /// then what `find_registry` and `ValidRegistry::load` return, and
-    /// `RootInEntry`.
+    /// `RootGitSymlink` or `RootInEntry`.
     pub fn load(git: &Git, cwd: &Path, start: &Path, locate: Locate<'_>) -> Result<Self> {
         git.check_version(cwd).map_err(version_error)?;
         let registry = locate.registry.map(|r| cwd.join(r));
@@ -354,7 +355,13 @@ pub enum CandidateKind {
 ///
 /// git runs only when the nearest taken is in a linked worktree (a `.git`
 /// file) and no link above it is taken, or when nothing is taken: one
-/// `rev-parse` asks for the main checkout.
+/// `rev-parse` asks for the main checkout. A `.git` is a checkout's only as
+/// a directory or a regular file, by `lstat` (`checkout_holding`): a
+/// symlinked one makes no checkout, and no git call goes through one — git
+/// runs at the checkout the walk found or at `start`, never in a dir whose
+/// own `.git` is a symlink, and its own search, which passes over a `.git`
+/// it can't use (an empty dir, a FIFO) and walks on up, is ceilinged below
+/// the nearest symlinked `.git` above where it runs (`git_ceiling_at`).
 ///
 /// # Errors
 ///
@@ -398,7 +405,8 @@ where
     /// A registry is often kept in one of the workspace's own repos and
     /// linked at the workspace root. Found outside any checkout, it stays
     /// where it's found. Found inside a checkout — the nearest dir at or
-    /// above it with a `.git`, read without git — the root is the nearest
+    /// above it with a `.git` dir or regular file, read without git and not
+    /// followed (`checkout_holding`) — the root is the nearest
     /// ancestor strictly above that checkout whose `repos.toml` is the same
     /// file: the same device and inode, followed through symlinks, so a
     /// hard link counts and no path spelling matters. Nearest, so the
@@ -443,7 +451,7 @@ where
             let linked = match checkout_holding(dir, bound) {
                 Some((top, linked)) => match self.nearest_link_above(top, file)? {
                     Some(found) => Some(found),
-                    None if linked => self.linked_from_main_checkout(dir)?,
+                    None if linked => self.linked_from_main_checkout(top, dir)?,
                     None => None,
                 },
                 None => None,
@@ -487,16 +495,22 @@ where
         Ok(None)
     }
 
-    /// When `dir` is in a linked worktree: the nearest link above the
-    /// repo's main checkout to the `repos.toml` there at `dir`'s relative
-    /// path (`nearest_link_above`), with its token, or `None` — and `None`
-    /// for a main checkout outside the bound, whose copy isn't read.
-    /// `dir` is physical (`discover_registry`), as git's paths are.
+    /// When `dir` is in the linked worktree `top` (`checkout_holding`): the
+    /// nearest link above the repo's main checkout to the `repos.toml`
+    /// there at `dir`'s relative path (`nearest_link_above`), with its
+    /// token, or `None` — and `None` for a main checkout outside the bound,
+    /// whose copy isn't read. `dir` is physical (`discover_registry`), as
+    /// git's paths are.
+    ///
+    /// git runs in `top`, whose `.git` is the regular file the walk read,
+    /// not in `dir`: a symlinked `.git` between them, passed over by the
+    /// walk, would be followed by git's own discovery.
     fn linked_from_main_checkout(
         &mut self,
+        top: &Path,
         dir: &Path,
     ) -> std::result::Result<Option<(PathBuf, T)>, E> {
-        let Some(found) = main_checkout(dir, true, self.git, self.bound) else {
+        let Some(found) = main_checkout(top, true, self.git, self.bound) else {
             return Ok(None);
         };
         let Some(relative) = found
@@ -517,17 +531,113 @@ where
 }
 
 /// The checkout holding `dir`, read without git: the nearest dir at or
-/// above it, inside `bound`, with a `.git` (followed through symlinks; one
-/// that can't be read is passed over), and whether that `.git` is a file,
-/// as a linked worktree's is. `None` outside any checkout.
+/// above it, inside `bound`, with a `.git` that is a directory or a
+/// regular file by `lstat`, and whether that `.git` is a file, as a linked
+/// worktree's is. `None` outside any checkout.
+///
+/// Not followed: a symlink named `.git` makes no checkout, whatever it
+/// points at, nor does any other kind of file or one that can't be read —
+/// each is passed over for a checkout further up. So a link can't send the
+/// walk, or the git calls a checkout gets, to a git dir elsewhere.
 fn checkout_holding<'d>(dir: &'d Path, bound: Option<&Bound>) -> Option<(&'d Path, bool)> {
     dir.ancestors()
         .take_while(|a| in_bound(a, bound))
         .find_map(|a| {
-            std::fs::metadata(a.join(".git"))
+            std::fs::symlink_metadata(a.join(".git"))
                 .ok()
+                .filter(|m| m.is_dir() || m.is_file())
                 .map(|m| (a, m.is_file()))
         })
+}
+
+/// Whether `dir/.git` is a symlink, by `lstat`.
+fn git_is_symlink(dir: &Path) -> bool {
+    std::fs::symlink_metadata(dir.join(".git")).is_ok_and(|m| m.is_symlink())
+}
+
+/// Where a git call run in a dir may look for its repo (`git_ceiling_at`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum GitReach<'p> {
+    /// Run, with this ceiling (`GIT_CEILING_DIRECTORIES`), if any.
+    Ceiling(Option<&'p Path>),
+    /// Don't run: git would reach a symlinked `.git` no ceiling can hide.
+    Refused,
+}
+
+/// The ceiling a git call run in `cwd` needs so its own discovery never
+/// reaches a symlinked `.git`, which it would follow: the nearest ancestor
+/// strictly above `cwd`, inside `bound`, whose `.git` is a symlink, else
+/// the bound's ceiling (`Bound::git_ceiling`). git passes over a `.git` it
+/// can't use (an empty or unreadable dir, a FIFO) and walks on up, so a
+/// symlink above one is in its reach; the ceiling stops it below the
+/// symlink's dir.
+///
+/// `Refused` when `cwd`'s own `.git` is a symlink (git reads `cwd` before
+/// any ceiling applies), or the ceiling dir holds a `:`, which
+/// `GIT_CEILING_DIRECTORIES` reads as a separator and has no escape for.
+fn git_ceiling_at<'p>(cwd: &'p Path, bound: Option<&'p Bound>) -> GitReach<'p> {
+    use std::os::unix::ffi::OsStrExt as _;
+    if git_is_symlink(cwd) {
+        return GitReach::Refused;
+    }
+    let Some(link) = cwd
+        .ancestors()
+        .skip(1)
+        .take_while(|a| in_bound(a, bound))
+        .find(|a| git_is_symlink(a))
+    else {
+        return GitReach::Ceiling(bound.and_then(Bound::git_ceiling));
+    };
+    if link.as_os_str().as_bytes().contains(&b':') {
+        return GitReach::Refused;
+    }
+    GitReach::Ceiling(Some(link))
+}
+
+/// `root/.git`, when it is a symlink by `lstat` — where git, run at
+/// `root`, would follow it to a git dir elsewhere (`check_discovered_root`).
+/// Only the root's own `.git`: one further up is `linked_past_git_symlink`'s.
+fn root_git_symlink(root: &Path) -> Option<PathBuf> {
+    let git = root.join(".git");
+    git_is_symlink(root).then_some(git)
+}
+
+/// The nearest `.git` strictly above `loc.root`, inside `bound`, when it is
+/// a symlink by `lstat` and a `repos.toml` above its repo, inside `bound`,
+/// is the registry's file (`file_id`): the symlink and that link, as
+/// `(git, link)`. The nearest `.git` that is a dir, a regular file, or a
+/// symlink — the kinds discovery reads — so a checkout's (which discovery
+/// would have walked past to the link) ends the search, and a FIFO or
+/// other special file, which discovery skips, doesn't.
+///
+/// The case the root's own `.git` (`root_git_symlink`) misses: a registry
+/// below a repo's top, linked above the repo, roots at its own dir when the
+/// repo's `.git` is a symlink — discovery sees no checkout, so the walk
+/// never reaches the link (`check_discovered_root`).
+fn linked_past_git_symlink(
+    loc: &RegistryLocation,
+    bound: Option<&Bound>,
+) -> Option<(PathBuf, PathBuf)> {
+    let id = file_id(&loc.path)?;
+    let repo = loc
+        .root
+        .ancestors()
+        .skip(1)
+        .take_while(|a| in_bound(a, bound))
+        .find(|a| {
+            std::fs::symlink_metadata(a.join(".git"))
+                .is_ok_and(|m| m.is_dir() || m.is_file() || m.is_symlink())
+        })?;
+    if !git_is_symlink(repo) {
+        return None;
+    }
+    let link = repo
+        .ancestors()
+        .skip(1)
+        .take_while(|a| in_bound(a, bound))
+        .map(|a| a.join(REGISTRY_FILE))
+        .find(|p| file_id(p) == Some(id))?;
+    Some((repo.join(".git"), link))
 }
 
 /// The identity of the file at `path`, through symlinks, or `None` on any
@@ -567,10 +677,11 @@ struct MainCheckout {
 /// nothing of where its main checkout is, unless it's named `.git` — then
 /// its parent is taken as the main checkout, as `git worktree list` does.
 ///
-/// No ceiling of its own: git's discovery walks up from `cwd` to the
-/// worktree (the cwd may be deep inside it), which a ceiling at the cwd
-/// would cut short, and only the indirection above could point the search
-/// astray. A caller's `bound` (`discover_registry`) gives git its ceiling.
+/// No ceiling at the cwd: git's discovery walks up from `cwd` to the
+/// worktree (the cwd may be deep inside it), which that would cut short.
+/// Its ceiling is the nearest symlinked `.git` above `cwd`, else the
+/// caller's `bound` (`git_ceiling_at`), and it doesn't run when `cwd`'s own
+/// `.git` is a symlink.
 fn main_checkout(
     cwd: &Path,
     toplevel: bool,
@@ -586,8 +697,11 @@ fn main_checkout(
     if toplevel {
         args.push("--show-toplevel");
     }
+    let GitReach::Ceiling(ceiling) = git_ceiling_at(cwd, bound) else {
+        return None;
+    };
     let opts = CallOptions {
-        ceiling: bound.and_then(Bound::git_ceiling),
+        ceiling,
         ..CallOptions::default()
     };
     let out = git.output_string(cwd, &args, opts).ok()?;
@@ -607,24 +721,58 @@ fn main_checkout(
     })
 }
 
-/// Refuses a discovered root (`RegistryLocation::discovered`) that is at or
-/// inside a checkout of one of the registry's own entries
-/// (`entry_holding_root`, unbounded).
+/// Refuses a discovered root (`RegistryLocation::discovered`) whose own
+/// `.git` is a symlink (`root_git_symlink`), or that is at or inside a
+/// checkout of one of the registry's own entries (`entry_holding_root`,
+/// unbounded).
 ///
-/// That's the registry's repo cloned with no link at the workspace root
-/// yet, a symlinked entry dir walked physically, a worktree whose own copy
-/// of the registry won because the main checkout's is gone, or a bare
-/// repo's worktree. Rooted there, every other entry would read as missing,
-/// and a sync would clone them into it.
+/// A symlinked `.git` makes no checkout to discovery (`checkout_holding`),
+/// so a registry kept at the top of a repo whose `.git` is one roots the
+/// workspace there, links above it or not — and git, run there, would
+/// follow the link, so whose checkout it is goes unread. A symlinked one
+/// further up (a dotfiles repo's at `$HOME`, or the repo's when the
+/// registry sits in a subdirectory of it) is passed over, and
+/// `entry_holding_root` passes over it — unless a link above that repo
+/// names the registry (`linked_past_git_symlink`), which the walk would
+/// have rooted at but for the symlink, so it's refused too. Left running:
+/// a registry not linked above that repo (unlinked, or linked only from
+/// inside it) in a subdirectory of such a repo, which a sync
+/// clones into — without git through the symlink, no different from a
+/// workspace under a dotfiles `$HOME`. An entry's
+/// checkout is the registry's repo cloned with no link at the workspace
+/// root yet, a symlinked entry dir walked physically, a worktree whose own
+/// copy of the registry won because the main checkout's is gone, or a bare
+/// repo's worktree. Rooted in either, every other entry would read as
+/// missing, and a sync would clone them into it.
 ///
 /// # Errors
 ///
+/// `RootGitSymlink` naming the symlink (and the link, when it's further
+/// up), read first and without git; then
 /// `RootInEntry` naming the first such entry, in registry order.
 fn check_discovered_root(loc: &RegistryLocation, entries: &[Entry], git: &Git) -> Result<()> {
     if !loc.discovered {
         return Ok(());
     }
-    entry_holding_root(&loc.root, entries, None, git).map_or(Ok(()), |e| {
+    // unbounded, as `find_registry`, which found it, is
+    let bound = None;
+    if let Some(link) = root_git_symlink(&loc.root) {
+        return Err(Error::RootGitSymlink {
+            root: loc.root.clone(),
+            registry: loc.path.clone(),
+            git: link,
+            linked: None,
+        });
+    }
+    if let Some((link, linked)) = linked_past_git_symlink(loc, bound) {
+        return Err(Error::RootGitSymlink {
+            root: loc.root.clone(),
+            registry: loc.path.clone(),
+            git: link,
+            linked: Some(linked),
+        });
+    }
+    entry_holding_root(&loc.root, entries, bound, git).map_or(Ok(()), |e| {
         Err(Error::RootInEntry {
             root: loc.root.clone(),
             registry: loc.path.clone(),
@@ -638,11 +786,15 @@ fn check_discovered_root(loc: &RegistryLocation, entries: &[Entry], git: &Git) -
 /// (`check_discovered_root`), with `entries` the registry found there.
 ///
 /// `root` is read canonicalized, as the bound is (`None` when it can't
-/// be). Read without git unless it is in a checkout (the nearest `.git` at
-/// or above it, inside `bound` — a caller passes the bound it discovered
+/// be). Read without git unless it is in a checkout (`checkout_holding`:
+/// the nearest `.git` dir or regular file at or above it, a symlinked one
+/// passed over, inside `bound` — a caller passes the bound it discovered
 /// with, so a checkout the walk didn't see, like a dotfiles repo at
 /// `$HOME`, isn't read here either); then git reads that checkout's
-/// `origin` URLs, under the bound's ceiling, both as configured (`config
+/// `origin` URLs, run there — not at `root`, whose own `.git` may be a
+/// symlink passed over — under the ceiling `git_ceiling_at` gives (the
+/// nearest symlinked `.git` above the checkout, else the bound's), both
+/// as configured (`config
 /// --get-all remote.origin.url`) and as git resolves them (`remote get-url
 /// --all`: `insteadOf` applied, worktree config honored), and any of
 /// either naming an entry as `origin_matches` reads an origin — owned and
@@ -661,8 +813,11 @@ pub fn entry_holding_root<'e>(
 ) -> Option<&'e Entry> {
     let root = root.canonicalize().ok()?;
     let (top, _) = checkout_holding(&root, bound)?;
+    let GitReach::Ceiling(ceiling) = git_ceiling_at(top, bound) else {
+        return None;
+    };
     let opts = CallOptions {
-        ceiling: bound.and_then(Bound::git_ceiling),
+        ceiling,
         ..CallOptions::default()
     };
     // the first entry, in registry order, one of the URLs git prints names

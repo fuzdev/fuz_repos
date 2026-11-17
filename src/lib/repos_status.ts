@@ -42,7 +42,7 @@ import { meta } from '@fuzdev/fuz_schema/meta.ts';
  * The `repos status --json` document's format version, Rust's
  * `STATUS_FORMAT_VERSION`: the one these schemas parse.
  */
-export const REPOS_STATUS_FORMAT_VERSION = 20;
+export const REPOS_STATUS_FORMAT_VERSION = 21;
 
 // u32 and u64 on the Rust side
 const Count = s.pipe(s.number, s.safe_integer, s.min_value(0));
@@ -637,6 +637,7 @@ export const ReposStatusErrorBody = s.variant('kind', [
 	s.object({ ...error_body_fields, kind: s.literal('root_not_found') }),
 	s.object({ ...error_body_fields, kind: s.literal('registry_not_found') }),
 	s.object({ ...error_body_fields, kind: s.literal('root_in_entry'), key: s.string }),
+	s.object({ ...error_body_fields, kind: s.literal('root_git_symlink') }),
 	s.object({ ...error_body_fields, kind: s.literal('registry_read') }),
 	s.object({ ...error_body_fields, kind: s.literal('registry_parse') }),
 	s.object({

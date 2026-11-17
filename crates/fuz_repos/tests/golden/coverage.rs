@@ -431,6 +431,7 @@ floor_index!(
         ErrorKind::RootNotFound,
         ErrorKind::RegistryNotFound,
         ErrorKind::RootInEntry { .. },
+        ErrorKind::RootGitSymlink,
         ErrorKind::RegistryRead,
         ErrorKind::RegistryParse,
         ErrorKind::RegistryInvalid { .. },

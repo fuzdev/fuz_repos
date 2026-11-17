@@ -677,6 +677,90 @@ fn a_bound_holds_the_jump_from_a_linked_worktree() {
 }
 
 #[test]
+fn a_symlinked_git_makes_no_checkout() {
+    let tmp = tempfile::tempdir().unwrap();
+    let top = tmp.path().canonicalize().unwrap();
+    let git = Git::new();
+
+    // a registry kept in `ws/meta`, linked at `ws`; `meta/.git` a symlink
+    // to a real git dir, then to a gitfile: no checkout, so no link roots it
+    let ws = top.join("ws");
+    let meta = ws.join("meta");
+    let real = place(&meta, None);
+    place(&ws, Some(&real));
+    let real_repo = top.join("real");
+    std::fs::create_dir_all(&real_repo).unwrap();
+    git_in(&real_repo, &["init", "-q"]);
+    std::fs::write(top.join("gitfile"), "gitdir: /nowhere\n").unwrap();
+    for target in [real_repo.join(".git"), top.join("gitfile")] {
+        std::os::unix::fs::symlink(&target, meta.join(".git")).unwrap();
+        assert_eq!(
+            discover_all(&meta, None, &git),
+            (
+                vec![(CandidateKind::Nearest, meta.clone())],
+                Some(meta.clone())
+            ),
+            "{}",
+            target.display()
+        );
+        assert!(entry_holding_root(&meta, &entries(&["meta"]), None, &git).is_none());
+        std::fs::remove_file(meta.join(".git")).unwrap();
+    }
+    assert_eq!(git.spawns(), 0);
+    // control: a `.git` dir roots it at the link
+    checkout(&meta);
+    assert_eq!(discover_all(&meta, None, &git).1, Some(ws));
+    std::fs::remove_dir(meta.join(".git")).unwrap();
+
+    // passed over for a real checkout further up
+    let outer = top.join("o");
+    let inner = outer.join("in");
+    let real = place(&inner, None);
+    place(&top, Some(&real));
+    checkout(&outer);
+    std::os::unix::fs::symlink(real_repo.join(".git"), inner.join(".git")).unwrap();
+    assert_eq!(discover_all(&inner, None, &git).1, Some(top.clone()));
+    std::fs::remove_file(top.join(REGISTRY_FILE)).unwrap();
+
+    // a symlink to a linked worktree's gitfile, whose main checkout's
+    // registry is linked above it: git isn't asked, so no jump there,
+    // with a registry of its own or none
+    let home = top.join("home");
+    let (main, wt) = (home.join("ws/meta"), home.join("wt"));
+    std::fs::create_dir_all(&home).unwrap();
+    repo_with_worktree(&main, &wt);
+    let real = place(&main, None);
+    place(&home.join("ws"), Some(&real));
+    let plain = home.join("plain");
+    place(&plain, None);
+    std::os::unix::fs::symlink("../wt/.git", plain.join(".git")).unwrap();
+    let git = Git::new();
+    assert_eq!(
+        discover_all(&plain, None, &git),
+        (
+            vec![(CandidateKind::Nearest, plain.clone())],
+            Some(plain.clone())
+        )
+    );
+    std::fs::remove_file(plain.join(REGISTRY_FILE)).unwrap();
+    assert_eq!(discover_all(&plain, None, &git), (vec![], None));
+    assert_eq!(git.spawns(), 0);
+    // control: from the worktree itself, git finds the main checkout
+    assert_eq!(discover_all(&wt, None, &git).1, Some(home.join("ws")));
+
+    // inside another linked worktree, a symlinked `.git` between the
+    // registry and the worktree's top is passed over by git too: git
+    // runs at the worktree's top, so `r`'s main checkout is asked, which
+    // holds no `sub/repos.toml`
+    let (r, rwt) = (home.join("r"), home.join("rwt"));
+    repo_with_worktree(&r, &rwt);
+    let sub = rwt.join("sub");
+    place(&sub, None);
+    std::os::unix::fs::symlink("../../wt/.git", sub.join(".git")).unwrap();
+    assert_eq!(discover_all(&sub, None, &git).1, Some(sub.clone()));
+}
+
+#[test]
 fn entry_holding_root_names_the_entry_whose_checkout_holds_the_root() {
     let tmp = tempfile::tempdir().unwrap();
     let top = tmp.path().canonicalize().unwrap();
@@ -758,6 +842,50 @@ fn entry_holding_root_reads_no_checkout_outside_the_bound() {
     assert_eq!(named(&x, None).as_deref(), Some("dots"));
     assert_eq!(named(&x, Some(&bound)), None);
     assert_eq!(named(&x, Some(&bound_within(&dev))), None);
+}
+
+#[test]
+fn a_symlinked_git_above_the_bound_lifts_no_ceiling_past_it() {
+    // a symlinked `.git` above an exclusive bound, a usable checkout at the
+    // bound's dir: the symlink is out of reach, so the ceiling stays the
+    // bound's, and git never reads the bound dir's `.git`
+    let tmp = tempfile::tempdir().unwrap();
+    let top = tmp.path().canonicalize().unwrap();
+    let home = top.join("home");
+    let dev = home.join("dev");
+    std::fs::create_dir_all(&home).unwrap();
+    git_in(&home, &["init", "-q"]);
+    git_in(
+        &home,
+        &["remote", "add", "origin", "https://github.com/me/dots"],
+    );
+    place(&dev, None);
+    let store = top.join("store/top.git");
+    std::fs::create_dir_all(&store).unwrap();
+    git_in(&store, &["init", "-q", "--bare"]);
+    std::os::unix::fs::symlink(&store, top.join(".git")).unwrap();
+    let es = entries(&["app", "dots"]);
+    let git = Git::new();
+    let bound = bound_below(&home);
+    // a `.git` that isn't a git dir, inside the bound: git, run there,
+    // searches up
+    let x = dev.join("x");
+    std::fs::create_dir_all(x.join(".git")).unwrap();
+    assert_eq!(
+        git_ceiling_at(&x, Some(&bound)),
+        GitReach::Ceiling(Some(home.as_path()))
+    );
+    assert!(entry_holding_root(&x, &es, Some(&bound), &git).is_none());
+    // control: unbounded, the symlink's dir is the ceiling, and git reads
+    // `home`'s checkout below it
+    assert_eq!(
+        git_ceiling_at(&x, None),
+        GitReach::Ceiling(Some(top.as_path()))
+    );
+    assert_eq!(
+        entry_holding_root(&x, &es, None, &git).map(|e| e.key.as_str()),
+        Some("dots")
+    );
 }
 
 #[test]
@@ -914,4 +1042,320 @@ fn suggests_by_key_or_dir_named_by_key() {
     // the closer of key and dir ranks it: `app_os` by its key
     assert_eq!(suggest("app_o"), ["app_os"]);
     assert_eq!(suggest("../vendor_app_os/"), ["app_os", "app_forge"]);
+}
+
+/// `home/ws/meta` a repo whose registry is linked at `home/ws`, with a
+/// linked worktree at `home/wt`, and `home/plain/.git` a symlink to the
+/// worktree's gitfile: `plain` returned.
+fn symlinked_gitfile_shape(home: &Path) -> PathBuf {
+    let (main, wt) = (home.join("ws/meta"), home.join("wt"));
+    std::fs::create_dir_all(home).unwrap();
+    repo_with_worktree(&main, &wt);
+    let real = place(&main, None);
+    place(&home.join("ws"), Some(&real));
+    let plain = home.join("plain");
+    std::fs::create_dir_all(&plain).unwrap();
+    std::os::unix::fs::symlink("../wt/.git", plain.join(".git")).unwrap();
+    plain
+}
+
+#[test]
+fn git_never_reaches_a_symlinked_git_past_one_it_cannot_use() {
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path().canonicalize().unwrap().join("home");
+    let plain = symlinked_gitfile_shape(&home);
+    let sub = plain.join("sub");
+    std::fs::create_dir_all(&sub).unwrap();
+    let git = Git::new();
+    // git passes over an empty `.git` dir or a FIFO and walks on up, to
+    // the symlink and through it to the worktree: the ceiling at `plain`
+    // stops it, so no jump to `ws`
+    for fifo in [false, true] {
+        let what = if fifo { "a FIFO" } else { "an empty dir" };
+        if fifo {
+            let status = std::process::Command::new("mkfifo")
+                .arg(sub.join(".git"))
+                .status()
+                .unwrap();
+            assert!(status.success());
+        } else {
+            std::fs::create_dir(sub.join(".git")).unwrap();
+        }
+        for bound in [None, Some(bound_below(&home))] {
+            assert_eq!(
+                discover_all(&sub, bound.as_ref(), &git),
+                (vec![], None),
+                "{what}, bound {bound:?}"
+            );
+        }
+        let deep = sub.join("deep");
+        std::fs::create_dir(&deep).unwrap();
+        assert_eq!(discover_all(&deep, None, &git), (vec![], None), "{what}");
+        // `sub` is a checkout to discovery when its `.git` is a dir: git,
+        // asked there for its origin, stops at the ceiling too
+        if !fifo {
+            assert!(entry_holding_root(&sub, &entries(&["meta"]), None, &git).is_none());
+        }
+        std::fs::remove_dir_all(&sub).unwrap();
+        std::fs::create_dir(&sub).unwrap();
+    }
+    // control: from the worktree itself, git still finds the main checkout
+    assert_eq!(
+        discover_all(&home.join("wt"), None, &git).1,
+        Some(home.join("ws"))
+    );
+}
+
+#[test]
+fn entry_holding_root_reads_no_origin_through_a_symlinked_git_above_its_checkout() {
+    let tmp = tempfile::tempdir().unwrap();
+    let top = tmp.path().canonicalize().unwrap();
+    let other = top.join("other");
+    std::fs::create_dir_all(&other).unwrap();
+    git_in(&other, &["init", "-q"]);
+    git_in(
+        &other,
+        &["remote", "add", "origin", "https://github.com/me/meta"],
+    );
+    let plain = top.join("plain");
+    let sub = plain.join("sub");
+    std::fs::create_dir_all(sub.join(".git")).unwrap();
+    std::os::unix::fs::symlink(other.join(".git"), plain.join(".git")).unwrap();
+    let git = Git::new();
+    let es = entries(&["meta"]);
+    // `sub`'s `.git` is no git dir: git walks up from it, to the ceiling
+    // below `plain`, never to `other`'s config
+    assert!(entry_holding_root(&sub, &es, Some(&bound_below(&top)), &git).is_none());
+    assert!(entry_holding_root(&sub, &es, None, &git).is_none());
+    assert!(entry_holding_root(&plain, &es, None, &git).is_none());
+}
+
+#[test]
+fn entry_holding_root_runs_git_at_the_checkout_holding_the_root() {
+    // a real checkout `outer`, and below it `inner`, whose `.git` is a
+    // symlink to another repo: each with an origin naming an entry
+    let tmp = tempfile::tempdir().unwrap();
+    let top = tmp.path().canonicalize().unwrap();
+    let outer = top.join("outer");
+    let inner = outer.join("inner");
+    let elsewhere = top.join("elsewhere");
+    for (dir, key) in [(&outer, "outer"), (&elsewhere, "inner")] {
+        std::fs::create_dir_all(dir).unwrap();
+        git_in(dir, &["init", "-q"]);
+        let url = format!("https://github.com/me/{key}");
+        git_in(dir, &["remote", "add", "origin", &url]);
+    }
+    std::fs::create_dir_all(&inner).unwrap();
+    std::os::unix::fs::symlink(elsewhere.join(".git"), inner.join(".git")).unwrap();
+    let git = Git::new();
+    // `inner` first, so reading its origin would name it
+    let es = entries(&["inner", "outer"]);
+    for bound in [None, Some(bound_below(&top))] {
+        let named = entry_holding_root(&inner, &es, bound.as_ref(), &git).map(|e| e.key.clone());
+        assert_eq!(named.as_deref(), Some("outer"), "bound {bound:?}");
+    }
+}
+
+#[test]
+fn no_git_runs_where_its_ceiling_would_hold_a_colon() {
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path().canonicalize().unwrap().join("ho:me");
+    let plain = symlinked_gitfile_shape(&home);
+    let sub = plain.join("sub");
+    std::fs::create_dir_all(sub.join(".git")).unwrap();
+    let git = Git::new();
+    assert_eq!(discover_all(&sub, None, &git), (vec![], None));
+    assert!(entry_holding_root(&sub, &entries(&["meta"]), None, &git).is_none());
+    assert_eq!(git.spawns(), 0);
+    assert_eq!(git_ceiling_at(&sub, None), GitReach::Refused);
+    assert_eq!(git_ceiling_at(&plain, None), GitReach::Refused);
+    // with no symlink in reach, a `:` above is no ceiling's business
+    std::fs::remove_file(plain.join(".git")).unwrap();
+    assert_eq!(git_ceiling_at(&sub, None), GitReach::Ceiling(None));
+}
+
+#[test]
+fn a_discovered_root_whose_own_git_is_a_symlink_is_refused() {
+    // a registry kept in `ws/meta`, linked at `ws`, whose `.git` is a
+    // symlink to a git dir elsewhere: discovery sees no checkout, so from
+    // inside `meta` the root is `meta`
+    let tmp = tempfile::tempdir().unwrap();
+    let top = tmp.path().canonicalize().unwrap();
+    let ws = top.join("ws");
+    let meta = ws.join("meta");
+    let real = place(&meta, None);
+    place(&ws, Some(&real));
+    let store = top.join("store/meta.git");
+    std::fs::create_dir_all(&store).unwrap();
+    git_in(&store, &["init", "-q", "--bare"]);
+    git_in(
+        &store,
+        &["remote", "add", "origin", "https://github.com/me/meta"],
+    );
+    std::os::unix::fs::symlink(&store, meta.join(".git")).unwrap();
+    let git = Git::new();
+    let es = entries(&["app", "meta"]);
+    let found = find_registry(&meta, None, None, &git).unwrap();
+    assert_eq!(found.root, meta);
+    let e = check_discovered_root(&found, &es, &git).unwrap_err();
+    assert!(
+        matches!(&e, Error::RootGitSymlink { root, git: link, .. }
+            if *root == meta && *link == meta.join(".git")),
+        "{e}"
+    );
+    // read without git
+    assert_eq!(git.spawns(), 0);
+    // and from below it, rooted at `meta` too
+    let deep = meta.join("deep");
+    std::fs::create_dir(&deep).unwrap();
+    let found = find_registry(&deep, None, None, &git).unwrap();
+    assert_eq!(found.root, meta);
+    let e = check_discovered_root(&found, &es, &git);
+    assert!(matches!(e, Err(Error::RootGitSymlink { .. })), "{e:?}");
+    // named by `--root` or `--registry`, never checked
+    let named = find_registry(&meta, None, Some(&meta), &git).unwrap();
+    check_discovered_root(&named, &es, &git).unwrap();
+    // control: from the link's dir the root is `ws`, which runs
+    let found = find_registry(&ws, None, None, &git).unwrap();
+    assert_eq!(found.root, ws);
+    check_discovered_root(&found, &es, &git).unwrap();
+}
+
+#[test]
+fn a_discovered_root_under_a_symlinked_git_runs() {
+    // `$HOME` a dotfiles repo whose `.git` is a symlink, the workspace
+    // `home/dev` no checkout of its own: only the root's own `.git` is
+    // read, so it runs
+    let tmp = tempfile::tempdir().unwrap();
+    let top = tmp.path().canonicalize().unwrap();
+    let home = top.join("home");
+    let dev = home.join("dev");
+    place(&dev, None);
+    let store = top.join("store/dots.git");
+    std::fs::create_dir_all(&store).unwrap();
+    git_in(&store, &["init", "-q", "--bare"]);
+    git_in(
+        &store,
+        &["remote", "add", "origin", "https://github.com/me/dots"],
+    );
+    std::os::unix::fs::symlink(&store, home.join(".git")).unwrap();
+    // a link at the dotfiles repo's own top is inside that repo, not above
+    // it: it doesn't make the registry linked past the symlink
+    place(&home, Some(&dev.join(REGISTRY_FILE)));
+    let git = Git::new();
+    let es = entries(&["app", "dots"]);
+    for start in [dev.clone(), dev.join("app")] {
+        std::fs::create_dir_all(&start).unwrap();
+        let found = find_registry(&start, None, None, &git).unwrap();
+        assert_eq!(found.root, dev);
+        check_discovered_root(&found, &es, &git).unwrap();
+    }
+    // the symlink passed over, no git runs
+    assert_eq!(git.spawns(), 0);
+}
+
+#[test]
+fn a_registry_below_the_top_of_a_repo_with_a_symlinked_git_runs() {
+    // the registry kept in `meta/sub`, `meta`'s `.git` a symlink:
+    // discovery sees no checkout, so the root is `meta/sub`, whose own
+    // `.git` isn't one — not refused, and its entries read as missing
+    let tmp = tempfile::tempdir().unwrap();
+    let top = tmp.path().canonicalize().unwrap();
+    let meta = top.join("ws/meta");
+    let sub = meta.join("sub");
+    place(&sub, None);
+    let store = top.join("store/meta.git");
+    std::fs::create_dir_all(&store).unwrap();
+    git_in(&store, &["init", "-q", "--bare"]);
+    git_in(
+        &store,
+        &["remote", "add", "origin", "https://github.com/me/meta"],
+    );
+    std::os::unix::fs::symlink(&store, meta.join(".git")).unwrap();
+    let git = Git::new();
+    let es = entries(&["app", "meta"]);
+    let found = find_registry(&sub, None, None, &git).unwrap();
+    assert_eq!(found.root, sub);
+    check_discovered_root(&found, &es, &git).unwrap();
+    assert_eq!(git.spawns(), 0);
+}
+
+#[test]
+fn a_registry_below_the_top_of_a_repo_with_a_symlinked_git_linked_above_is_refused() {
+    // the `cfg/` layout: the registry in `meta/cfg`, linked at `ws`, but
+    // `meta`'s `.git` a symlink: discovery sees no checkout, so the walk
+    // never reaches the link and the root is `meta/cfg` — refused, since
+    // a sync there would clone the fleet into `meta`
+    let tmp = tempfile::tempdir().unwrap();
+    let top = tmp.path().canonicalize().unwrap();
+    let ws = top.join("ws");
+    let meta = ws.join("meta");
+    let cfg = meta.join("cfg");
+    let real = place(&cfg, None);
+    place(&ws, Some(&real));
+    let store = top.join("store/meta.git");
+    std::fs::create_dir_all(&store).unwrap();
+    git_in(&store, &["init", "-q", "--bare"]);
+    std::os::unix::fs::symlink(&store, meta.join(".git")).unwrap();
+    let git = Git::new();
+    let es = entries(&["app", "meta"]);
+    for start in [cfg.clone(), cfg.join("deep")] {
+        std::fs::create_dir_all(&start).unwrap();
+        let found = find_registry(&start, None, None, &git).unwrap();
+        assert_eq!(found.root, cfg);
+        let e = check_discovered_root(&found, &es, &git).unwrap_err();
+        assert!(
+            matches!(&e, Error::RootGitSymlink { root, git: link, linked: Some(linked), .. }
+                if *root == cfg && *link == meta.join(".git")
+                    && *linked == ws.join(REGISTRY_FILE)),
+            "{e}"
+        );
+    }
+    // read without git
+    assert_eq!(git.spawns(), 0);
+    // named, never checked; from the link's dir the root is `ws`
+    let named = find_registry(&cfg, None, Some(&cfg), &git).unwrap();
+    check_discovered_root(&named, &es, &git).unwrap();
+    let found = find_registry(&ws, None, None, &git).unwrap();
+    assert_eq!(found.root, ws);
+    check_discovered_root(&found, &es, &git).unwrap();
+    // a link naming some other file isn't this registry's
+    std::fs::remove_file(ws.join(REGISTRY_FILE)).unwrap();
+    std::fs::write(ws.join(REGISTRY_FILE), "").unwrap();
+    let found = find_registry(&cfg, None, None, &git).unwrap();
+    check_discovered_root(&found, &es, &git).unwrap();
+}
+
+#[test]
+fn a_fifo_git_below_the_symlinked_one_hides_no_link_above() {
+    // the `cfg/` layout one level deeper, with a FIFO `.git` at `meta/a`:
+    // discovery skips the FIFO and the symlink, so the root is
+    // `meta/a/cfg`; the search for the repo skips the FIFO too, so the
+    // link at `ws` is still found and the root refused
+    let tmp = tempfile::tempdir().unwrap();
+    let top = tmp.path().canonicalize().unwrap();
+    let ws = top.join("ws");
+    let meta = ws.join("meta");
+    let cfg = meta.join("a/cfg");
+    let real = place(&cfg, None);
+    place(&ws, Some(&real));
+    let store = top.join("store/meta.git");
+    std::fs::create_dir_all(&store).unwrap();
+    git_in(&store, &["init", "-q", "--bare"]);
+    std::os::unix::fs::symlink(&store, meta.join(".git")).unwrap();
+    let status = std::process::Command::new("mkfifo")
+        .arg(meta.join("a/.git"))
+        .status()
+        .unwrap();
+    assert!(status.success());
+    let git = Git::new();
+    let es = entries(&["app", "meta"]);
+    let found = find_registry(&cfg, None, None, &git).unwrap();
+    assert_eq!(found.root, cfg);
+    let e = check_discovered_root(&found, &es, &git).unwrap_err();
+    assert!(
+        matches!(&e, Error::RootGitSymlink { git: link, linked: Some(linked), .. }
+            if *link == meta.join(".git") && *linked == ws.join(REGISTRY_FILE)),
+        "{e}"
+    );
 }

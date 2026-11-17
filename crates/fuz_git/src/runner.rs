@@ -59,7 +59,13 @@ const NETWORK_TIMEOUT: Duration = Duration::from_secs(120);
 /// SSH's connect timeout under batch mode, in seconds.
 const SSH_CONNECT_TIMEOUT_SECS: u32 = 15;
 
-/// Inherited variables that would point git somewhere other than `-C`.
+/// Inherited variables that would point git somewhere other than `-C`, or
+/// change how it reads a path it's handed: the pathspec modes would read
+/// every path as a glob or literally, and any one of them makes
+/// `check-ignore` refuse its input outright (`pathspec magic not
+/// supported`). `GIT_DISCOVERY_ACROSS_FILESYSTEM` would let discovery climb
+/// past a mount point, where git stops by default, to a repo on another
+/// filesystem that the caller never pointed at.
 const SCRUBBED_ENV: &[&str] = &[
     "GIT_DIR",
     "GIT_WORK_TREE",
@@ -69,6 +75,11 @@ const SCRUBBED_ENV: &[&str] = &[
     "GIT_COMMON_DIR",
     "GIT_NAMESPACE",
     "GIT_CEILING_DIRECTORIES",
+    "GIT_DISCOVERY_ACROSS_FILESYSTEM",
+    "GIT_LITERAL_PATHSPECS",
+    "GIT_GLOB_PATHSPECS",
+    "GIT_NOGLOB_PATHSPECS",
+    "GIT_ICASE_PATHSPECS",
 ];
 
 /// Inherited variables an anonymous read drops: config from the
@@ -217,6 +228,31 @@ pub enum GitError {
         /// What was unexpected, quoting the output lossily and capped.
         detail: String,
     },
+    /// `Git::check_ignore` was given a path inside a submodule, which git
+    /// refuses outright (`fatal: Pathspec … is in submodule …`, exit 128)
+    /// after answering for the paths before it; that partial answer is
+    /// dropped.
+    #[error("git {args}: a path is in a submodule: {stderr}")]
+    InSubmodule {
+        /// The call's arguments, space-joined.
+        args: String,
+        /// Git's trimmed stderr, naming the path and the submodule.
+        stderr: String,
+    },
+    /// A path to hand git NUL-separated holds a NUL itself, so git would
+    /// read it as two; nothing was run.
+    #[error("path `{path}` holds a NUL byte")]
+    PathHasNul {
+        /// The path, quoted lossily and capped.
+        path: String,
+    },
+    /// A relative path given `Git::check_ignore` that normalizes to the dir
+    /// it's asked from, or climbs above it; nothing was run.
+    #[error("path `{path}` is not below the dir it's asked from")]
+    PathNotBelowDir {
+        /// The path as given, quoted lossily and capped.
+        path: String,
+    },
     /// An anonymous read of a URL that has no `<scheme>://`, or carries
     /// userinfo. `url` is shown without its userinfo.
     #[error("`{url}` is not a `<scheme>://` URL without credentials")]
@@ -277,6 +313,13 @@ pub struct CallOptions<'a> {
     /// call that takes its input there (`cat-file --batch`); `None` gives it
     /// none (`/dev/null`).
     pub stdin: Option<&'a [u8]>,
+    /// Refuse a bare repo that discovery finds rather than one named
+    /// (`-c safe.bareRepository=explicit`), for a caller pointed at a dir
+    /// it doesn't vouch for: a bare repo planted in a tracked tree would
+    /// otherwise be read as a repo, its config with it. Off by default,
+    /// since a caller working on bare repos it made (a mirror, a test
+    /// fixture) finds them by discovery.
+    pub refuse_implicit_bare: bool,
 }
 
 /// Options for a call that reaches a remote.
@@ -432,6 +475,8 @@ impl Git {
                 lazy_fetch: false,
                 env: &[],
                 stdin: None,
+                // `--git-dir=/dev/null`: no repo is discovered
+                refuse_implicit_bare: false,
             },
         );
         let allowed = match self.env_var("GIT_ALLOW_PROTOCOL") {
@@ -473,21 +518,24 @@ impl Git {
             "maintenance.auto=false",
             "-c",
             "core.alternateRefsCommand=true",
-            "-C",
-        ])
-        .arg(dir)
-        .args(args)
-        .env("GIT_TERMINAL_PROMPT", "0")
-        .env("LC_ALL", "C")
-        .env("GIT_OPTIONAL_LOCKS", "0")
-        .env("GIT_NO_LAZY_FETCH", if opts.lazy_fetch { "0" } else { "1" })
-        .stdin(if opts.stdin.is_some() {
-            Stdio::piped()
-        } else {
-            Stdio::null()
-        })
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
+        ]);
+        if opts.refuse_implicit_bare {
+            cmd.args(["-c", "safe.bareRepository=explicit"]);
+        }
+        cmd.arg("-C")
+            .arg(dir)
+            .args(args)
+            .env("GIT_TERMINAL_PROMPT", "0")
+            .env("LC_ALL", "C")
+            .env("GIT_OPTIONAL_LOCKS", "0")
+            .env("GIT_NO_LAZY_FETCH", if opts.lazy_fetch { "0" } else { "1" })
+            .stdin(if opts.stdin.is_some() {
+                Stdio::piped()
+            } else {
+                Stdio::null()
+            })
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
         for var in SCRUBBED_ENV {
             cmd.env_remove(var);
         }
@@ -793,6 +841,7 @@ mod tests {
             ("GIT_TERMINAL_PROMPT".into(), "1".into()),
             ("LC_ALL".into(), "tr_TR.UTF-8".into()),
             ("GIT_DIR".into(), "/nowhere".into()),
+            ("GIT_DISCOVERY_ACROSS_FILESYSTEM".into(), "1".into()),
         ];
         if let Some(path) = std::env::var_os("PATH") {
             env.push(("PATH".into(), path));
@@ -819,6 +868,7 @@ mod tests {
             .expect("the test process has an environment");
         // scrubbed even when the caller sets it; not inherited when it doesn't
         assert!(!has_var("GIT_DIR"), "{seen:?}");
+        assert!(!has_var("GIT_DISCOVERY_ACROSS_FILESYSTEM"), "{seen:?}");
         assert!(!has_var("HOME"), "{seen:?}");
         assert!(!has(&inherited), "{inherited}: {seen:?}");
 
@@ -1085,6 +1135,30 @@ mod tests {
             hash(None).trim(),
             "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391"
         );
+    }
+
+    /// A bare repo found by discovery is read by default and refused when
+    /// the call asks; a working tree's own `.git` is never refused.
+    #[test]
+    fn a_call_can_refuse_an_implicit_bare_repo() {
+        let f = crate::test_fixture::Fixture::new();
+        f.git_in(f.tmp.path(), &["init", "-q", "--bare", "bare.git"], None);
+        let bare = f.tmp.path().join("bare.git");
+        let git = f.runner();
+        let git_dir = |dir: &Path, refuse_implicit_bare| {
+            let opts = CallOptions {
+                refuse_implicit_bare,
+                ..CallOptions::default()
+            };
+            git.output_string(dir, &["rev-parse", "--git-dir"], opts)
+        };
+        assert_eq!(git_dir(&bare, false).unwrap().trim(), ".");
+        let e = git_dir(&bare, true).unwrap_err();
+        assert!(
+            matches!(&e, GitError::Failed { stderr, .. } if stderr.contains("safe.bareRepository")),
+            "{e}"
+        );
+        assert_eq!(git_dir(&f.repo(), true).unwrap().trim(), ".git");
     }
 
     #[test]

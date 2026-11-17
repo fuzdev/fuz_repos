@@ -284,8 +284,10 @@ Every `src/lib` module is listed here or under
 - `src/lib/repos_status.ts` - fuz_schema mirror of the `repos status --json`
   document (report and error document), guarded by the goldens
 - `crates/fuz_git/` - the hardened git runner, its read ops (`Git::ls_files`:
-  a working tree's files, apart from nested repos and gitlinks), and
-  remote-URL parsing and redaction, shared across the ecosystem: synchronous,
+  a working tree's files, apart from nested repos and gitlinks;
+  `Git::ls_ignored` and `Git::check_ignore`: git's ignore rule, for a caller
+  walking a tree itself), and remote-URL parsing and redaction, shared across
+  the ecosystem: synchronous,
   no async runtime (callers on one use `spawn_blocking`), `thiserror` its
   only dependency
 - `crates/fuz_repos/` - the Rust `repos` tool: a library — registry, probe,

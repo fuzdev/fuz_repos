@@ -1857,12 +1857,16 @@ fn count_unique(
 /// (`ProbeErrorKind`), git's message kept.
 fn git_failure(e: &GitError) -> ProbeError {
     let kind = match e {
-        // `UnsupportedUrl` comes only from the anonymous read, which the probe never runs
-        GitError::NotFound | GitError::Spawn(_) | GitError::UnsupportedUrl { .. } => {
-            ProbeErrorKind::GitNotRun
-        }
+        // `UnsupportedUrl` comes only from the anonymous read, and
+        // `PathHasNul`, `PathNotBelowDir`, and `InSubmodule` only from
+        // `check_ignore`, neither of which the probe runs
+        GitError::NotFound
+        | GitError::Spawn(_)
+        | GitError::UnsupportedUrl { .. }
+        | GitError::PathHasNul { .. }
+        | GitError::PathNotBelowDir { .. } => ProbeErrorKind::GitNotRun,
         GitError::Timeout { .. } => ProbeErrorKind::GitTimedOut,
-        GitError::Failed { .. } => ProbeErrorKind::GitFailed,
+        GitError::Failed { .. } | GitError::InSubmodule { .. } => ProbeErrorKind::GitFailed,
         GitError::OutputTooLarge { .. }
         | GitError::NonUtf8 { .. }
         | GitError::UnexpectedOutput { .. } => ProbeErrorKind::UnexpectedOutput,

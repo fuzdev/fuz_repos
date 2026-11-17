@@ -8,7 +8,10 @@
 //!
 //! Read ops on the runner: `Git::ls_files` lists a working tree's files,
 //! tracked and untracked but not ignored, apart from the nested repos and
-//! gitlinks it doesn't descend into.
+//! gitlinks it doesn't descend into; `Git::ls_ignored` lists the untracked
+//! paths git ignores, folding whole dirs, and `Git::check_ignore` says which
+//! of a set of paths are ignored — together, git's ignore rule for a caller
+//! walking a tree itself.
 //!
 //! Synchronous, with no async runtime: a caller on a runtime wraps calls in
 //! `spawn_blocking`.
@@ -17,11 +20,17 @@
 
 #![warn(missing_docs)]
 
+mod check_ignore;
 mod ls_files;
+mod ls_ignored;
+mod records;
 mod runner;
+#[cfg(test)]
+mod test_fixture;
 pub mod url;
 
 pub use ls_files::ListedFiles;
+pub use ls_ignored::IgnoredPaths;
 pub use runner::{
     CallOptions, Git, GitError, GitOutput, GitVersion, MIN_GIT_VERSION, NetworkOptions,
     VersionError,

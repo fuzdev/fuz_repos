@@ -2,10 +2,9 @@
 //! untracked but not ignored — apart from the nested repos it doesn't
 //! descend into.
 
-use std::ffi::OsString;
-use std::os::unix::ffi::OsStringExt;
 use std::path::{Path, PathBuf};
 
+use crate::records::{quote_record, split_records, to_paths};
 use crate::runner::{CallOptions, Git, GitError};
 
 /// The listing's arguments: the index's entries (`--cached`) and the
@@ -28,9 +27,6 @@ const ARGS: &[&str] = &[
 
 /// A gitlink's mode in the index.
 const GITLINK_MODE: &[u8] = b"160000";
-
-/// How much of an unrecognized record an error quotes.
-const QUOTED_RECORD_CAP: usize = 80;
 
 /// What `Git::ls_files` lists, each path relative to the dir it listed and
 /// held as git's bytes, each list sorted by those bytes (git's own order).
@@ -117,23 +113,13 @@ fn parse_listing(stdout: &[u8]) -> Result<ListedFiles, &[u8]> {
     let mut entries: Vec<(&[u8], bool)> = Vec::new();
     let mut files: Vec<&[u8]> = Vec::new();
     let mut nested_repos: Vec<&[u8]> = Vec::new();
-    if !stdout.is_empty() {
-        // every record ends in a NUL, the last one included; an
-        // unterminated one is what follows the last NUL
-        let body = stdout.strip_suffix(b"\0").ok_or_else(|| {
-            stdout
-                .iter()
-                .rposition(|&b| b == 0)
-                .map_or(stdout, |nul| &stdout[nul + 1..])
-        })?;
-        for record in body.split(|&b| b == 0) {
-            match parse_record(record).ok_or(record)? {
-                Record::Entry { path, gitlink } => entries.push((path, gitlink)),
-                Record::Untracked(path) => match path.strip_suffix(b"/") {
-                    Some(repo) => nested_repos.push(repo),
-                    None => files.push(path),
-                },
-            }
+    for record in split_records(stdout)? {
+        match parse_record(record).ok_or(record)? {
+            Record::Entry { path, gitlink } => entries.push((path, gitlink)),
+            Record::Untracked(path) => match path.strip_suffix(b"/") {
+                Some(repo) => nested_repos.push(repo),
+                None => files.push(path),
+            },
         }
     }
     // a conflicted path's stages are adjacent in the index; kept once, a
@@ -188,82 +174,15 @@ fn parse_record(record: &[u8]) -> Option<Record<'_>> {
     })
 }
 
-/// Sorts `names` by their bytes and makes them paths, losslessly.
-fn to_paths(mut names: Vec<&[u8]>) -> Vec<PathBuf> {
-    names.sort_unstable();
-    names
-        .into_iter()
-        .map(|name| PathBuf::from(OsString::from_vec(name.to_vec())))
-        .collect()
-}
-
-/// An unrecognized record for an error message: lossily decoded, control
-/// characters escaped, capped. Only enough bytes for the cap are decoded (a
-/// char is at most 4), so a huge record isn't copied whole.
-fn quote_record(record: &[u8]) -> String {
-    let head = &record[..record.len().min(QUOTED_RECORD_CAP * 4)];
-    String::from_utf8_lossy(head)
-        .chars()
-        .flat_map(char::escape_debug)
-        .take(QUOTED_RECORD_CAP)
-        .collect()
-}
-
 #[cfg(test)]
 mod tests {
-    use std::ffi::OsStr;
+    use std::ffi::{OsStr, OsString};
     use std::os::unix::ffi::OsStrExt;
 
     use super::*;
-
-    /// A repo at `<tmp>/repo` with a home at `<tmp>/home`, and the clean
-    /// environment its runners see: `PATH`, that `HOME`, and no system
-    /// config.
-    struct Fixture {
-        tmp: tempfile::TempDir,
-        env: Vec<(OsString, OsString)>,
-    }
+    use crate::test_fixture::{Fixture, paths};
 
     impl Fixture {
-        fn new() -> Self {
-            let tmp = tempfile::tempdir().unwrap();
-            std::fs::create_dir(tmp.path().join("home")).unwrap();
-            let mut env: Vec<(OsString, OsString)> = vec![
-                ("HOME".into(), tmp.path().join("home").into()),
-                ("GIT_CONFIG_NOSYSTEM".into(), "1".into()),
-            ];
-            env.extend(std::env::var_os("PATH").map(|p| ("PATH".into(), p)));
-            let fixture = Self { tmp, env };
-            fixture.git_in(fixture.tmp.path(), &["init", "-q", "repo"], None);
-            fixture
-        }
-
-        fn repo(&self) -> PathBuf {
-            self.tmp.path().join("repo")
-        }
-
-        /// Runs a setup call in `dir` on a runner of its own.
-        fn git_in(&self, dir: &Path, args: &[&str], stdin: Option<&[u8]>) -> String {
-            let opts = CallOptions {
-                stdin,
-                ..CallOptions::default()
-            };
-            Git::with_clean_env(self.env.clone())
-                .output_string(dir, args, opts)
-                .unwrap()
-        }
-
-        fn git(&self, args: &[&str]) -> String {
-            self.git_in(&self.repo(), args, None)
-        }
-
-        /// Writes `contents` at `name` under the repo, creating its dirs.
-        fn write(&self, name: impl AsRef<OsStr>, contents: &str) {
-            let path = self.repo().join(name.as_ref());
-            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-            std::fs::write(path, contents).unwrap();
-        }
-
         fn list(&self) -> (ListedFiles, u32) {
             list_with(&self.repo(), self.env.clone())
         }
@@ -275,13 +194,6 @@ mod tests {
         let git = Git::with_clean_env(env);
         let listed = git.ls_files(dir, CallOptions::default()).unwrap();
         (listed, git.spawns())
-    }
-
-    fn paths(names: &[&[u8]]) -> Vec<PathBuf> {
-        names
-            .iter()
-            .map(|n| PathBuf::from(OsStr::from_bytes(n)))
-            .collect()
     }
 
     /// A made-up commit id, for a gitlink no object backs.
@@ -521,12 +433,5 @@ mod tests {
         assert_eq!(parse_listing(b"? b"), Err(&b"? b"[..]));
         assert_eq!(parse_listing(b"? a\0junk\0"), Err(&b"junk"[..]));
         assert_eq!(parse_listing(b"? a\0\0? b\0"), Err(&b""[..]));
-        assert_eq!(quote_record(&[b'x'; 200]).len(), QUOTED_RECORD_CAP);
-        // non-UTF-8 bytes past the cap's worth aren't decoded
-        assert_eq!(
-            quote_record(&[0xff; 1000]).chars().count(),
-            QUOTED_RECORD_CAP
-        );
-        assert_eq!(quote_record(b"a\tb\xff"), "a\\tb\u{fffd}");
     }
 }

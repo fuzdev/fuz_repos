@@ -11,6 +11,7 @@ import { create_fs_paths } from '@fuzdev/gro/fs_paths.ts';
 import { GIT_LOCAL_PASS_ENV, to_git_program } from '@fuzdev/gro/git.ts';
 import { package_json_load } from '@fuzdev/gro/package_json.ts';
 import { env } from '@fuzdev/gro/env.ts';
+import { cwd } from '@fuzdev/gro/cwd.ts';
 import { spawn } from '@fuzdev/gro/spawn.ts';
 import { existsSync, readFileSync } from 'node:fs';
 import { styleText as st } from 'node:util';
@@ -228,7 +229,7 @@ export interface GitopsSyncDeps {
 	read_file: (path: string) => string;
 }
 
-const fs_paths = create_fs_paths(fs);
+const fs_paths = create_fs_paths(fs, { cwd: cwd(), home: env.get('HOME') });
 
 const default_gitops_sync_deps: GitopsSyncDeps = {
 	repos_ops: default_repos_operations,

@@ -2,6 +2,8 @@ import { assert, describe, test } from 'vitest';
 import { assert_rejects } from '@fuzdev/fuz_util/testing.ts';
 import { fs } from '@fuzdev/gro/fs.ts';
 import { create_fs_paths } from '@fuzdev/gro/fs_paths.ts';
+import { cwd } from '@fuzdev/gro/cwd.ts';
+import { env } from '@fuzdev/gro/env.ts';
 import { GIT_LOCAL_PASS_ENV, to_git_program } from '@fuzdev/gro/git.ts';
 import { spawn } from '@fuzdev/gro/spawn.ts';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -85,7 +87,7 @@ describe('local_repo_load', () => {
 					local_repo_load({
 						local_repo_path,
 						modules: true,
-						fs_paths: create_fs_paths(fs),
+						fs_paths: create_fs_paths(fs, { cwd: cwd(), home: env.get('HOME') }),
 						git: to_git_program(spawn, { pass_env: GIT_LOCAL_PASS_ENV })
 					}),
 				/Failed to load library metadata/

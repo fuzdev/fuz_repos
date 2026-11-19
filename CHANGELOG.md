@@ -1,5 +1,26 @@
 # @fuzdev/fuz_repos
 
+## 0.96.0
+
+### Minor Changes
+
+- Update dependencies (BREAKING CHANGES) ([e44bcfd](https://github.com/fuzdev/fuz_repos/commit/e44bcfd))
+  
+  Breaking dependency changes:
+  - @fuzdev/fuz_util: 0.81.0 → 0.83.0 (minor)
+  - @fuzdev/fuz_css: 0.81.0 → 0.83.0 (minor)
+  - @fuzdev/gro: 0.237.0 → 0.238.0 (minor)
+  - @fuzdev/fuz_ui: 0.227.0 → 0.230.0 (minor)
+- **breaking** deps: peer `@fuzdev/gro` `>=0.237.0`; the tasks read `task_args`, and failures print through `format_error_detail`, so a host module error's cause shows ([aef20c8](https://github.com/fuzdev/fuz_repos/commit/aef20c8))
+- **breaking** feat: require gro 0.230, delete `spawn_capture` for `SpawnProgram.out` with `stdin: 'inherit'`; `gitops_run` caps each stream at 64 MiB, a command past it failing with an output limit error, and adds `truncated` to its results ([d0f1ea2](https://github.com/fuzdev/fuz_repos/commit/d0f1ea2))
+- **breaking** feat: `repos` refuses a discovered root whose own `.git` is a symlink (`root_git_symlink`, exit 2) — a symlinked `.git` further up, like a dotfiles repo's at `$HOME`, is passed over, unless it's the nearest `.git` above the root and a `repos.toml` above that repo links the registry, which is refused too (a registry not linked above that repo, in a subdirectory of it, still runs, and a sync there clones into the checkout) — and discovery's git calls stop below a symlinked `.git` past one git can't use; the error documents carry the new kind (breaking: the `--json` formats are `repos status` 21, `repos sync` 15, and `repos push` 13 — reinstall the `repos` binary with `cargo install --path crates/fuz_repos --locked`) ([5bc5e84](https://github.com/fuzdev/fuz_repos/commit/5bc5e84))
+
+### Patch Changes
+
+- fix: declaration maps resolve to the shipped source, so go-to-definition lands in `src/lib` ([abc3e6b](https://github.com/fuzdev/fuz_repos/commit/abc3e6b))
+- deps: peer '@fuzdev/fuz_schema' `>=0.5.7`, admitting 0.6: the floor is the version whose named schema types (`ObjectSchema`, `StringSchema`, …) this package's declarations print when built against it, and 0.6.0's type changes compile here unchanged ([83308ca](https://github.com/fuzdev/fuz_repos/commit/83308ca))
+- fix: `gitops_sync` passes `create_fs_paths` the working directory and `$HOME`, as gro 0.238 requires ([92bc07d](https://github.com/fuzdev/fuz_repos/commit/92bc07d))
+
 ## 0.95.0
 
 ### Minor Changes

@@ -16,6 +16,7 @@ const config: GitopsConfig = {
 		'tsv',
 		'tsv.fuz.dev',
 		'zzz',
+		'cord',
 		'docs.fuz.dev',
 		'fuz_repos'
 		// 'fuz.dev',

@@ -44,7 +44,7 @@ jobs:
           node-version: ${{ matrix.node-version }}
           cache: npm
       - run: npm ci
-      - run: npx @fuzdev/gro check --workspace --build
+      - run: npx @fuzdev/gro check --workspace --build --lint
 
   # The Rust `repos` tool (crates/fuz_repos), a Cargo workspace beside the
   # SvelteKit app that gro never invokes, so it gets its own job.

@@ -656,6 +656,8 @@ struct Actions {
     moves: Vec<String>,
     rebases: Vec<String>,
     clones: Vec<String>,
+    /// The tags sync's fetch created, by entry: `key +n`.
+    tags: Vec<String>,
 }
 
 impl Actions {
@@ -679,13 +681,27 @@ impl Actions {
         self.clones.push(format!("{key}{note}"));
     }
 
+    /// Adds the tags an entry's fetch created, by its key: their count,
+    /// and under `verbose` their names.
+    fn add_tags(&mut self, key: &str, tags: &[String], verbose: bool) {
+        if tags.is_empty() {
+            return;
+        }
+        let names = if verbose {
+            format!(" ({})", tags.join(" "))
+        } else {
+            String::new()
+        };
+        self.tags.push(format!("{key} +{}{names}", tags.len()));
+    }
+
     /// Adds a reference's refresh, by its key; `note` as for `add`.
     fn add_refresh(&mut self, key: &str, note: &str) {
         self.refreshes.push(format!("{key}{note}"));
     }
 
     /// A run per verb — `refresh lib`, `push a +1`, `ff …`, `move …`,
-    /// `rebase c +1 −2`, `clone …` — omitting empty verbs.
+    /// `rebase c +1 −2`, `clone …`, `tag lib +2` — omitting empty verbs.
     fn verbs(&self) -> Vec<(&'static str, Vec<String>)> {
         [
             ("refresh ", &self.refreshes),
@@ -694,6 +710,7 @@ impl Actions {
             ("move ", &self.moves),
             ("rebase ", &self.rebases),
             ("clone ", &self.clones),
+            ("tag ", &self.tags),
         ]
         .into_iter()
         .filter(|(_, items)| !items.is_empty())
@@ -708,6 +725,7 @@ impl Actions {
             + self.moves.len()
             + self.rebases.len()
             + self.clones.len()
+            + self.tags.len()
     }
 }
 
@@ -798,6 +816,9 @@ impl Groups {
         self.add_refresh_item(e, sync);
         self.add_clone_item(e, sync);
         self.add_branch_items(e, sync, view);
+        if let Some(s) = sync {
+            self.act.add_tags(&e.key, &s.tags, verbose);
+        }
         self.add_unprobed_items(e, workspace, view);
         self.add_uncommitted_items(e, view, verbose);
         let said = self.len() > before;

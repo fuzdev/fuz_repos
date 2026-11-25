@@ -41,13 +41,15 @@
 //! diverged registry branch's local-only commits onto the fetched upstream
 //! (the rebase `sync` makes, and `push` of the branch it's asked to push),
 //! new commit objects carrying the same changes, messages, authors, and
-//! author dates. It never makes a commit of new content or a tag, resolves
+//! author dates. It never makes a commit of new content or a tag of its own
+//! (`sync`'s fetch creates origin's tags missing locally), resolves
 //! a conflict, merges anything but a fast-forward, force-pushes, deletes a
 //! branch, or prunes a worktree. `status` writes nothing, and `status
 //! --fetch`'s fetch writes remote-tracking refs and what a fetch needs
 //! behind them (objects, `FETCH_HEAD`, the shallow boundary) — never a
 //! tag; `sync` writes the branch it acts on, the checkout that branch is
-//! on, the commits a rebase replays, and new clones. `push` writes, beyond
+//! on, the commits a rebase replays, new clones, and the tags its fetch
+//! follows, never moving or deleting one. `push` writes, beyond
 //! its fetch, only one branch's rebase — when the branch it's asked to push
 //! diverged — and then the push. A push, `sync`'s or `push`'s, writes one
 //! remote branch of an owned entry, under a lease (on the fetched tip, or
@@ -89,7 +91,7 @@ pub const STATUS_FORMAT_VERSION: u32 = 21;
 /// The version of the `repos sync --json` document. Bumped on any change to
 /// its shape, the embedded status report's included (so with every
 /// `STATUS_FORMAT_VERSION` bump).
-pub const SYNC_FORMAT_VERSION: u32 = 15;
+pub const SYNC_FORMAT_VERSION: u32 = 16;
 
 /// The version of the `repos push --json` document. Bumped on any change to
 /// its shape, the embedded status report's included (so with every

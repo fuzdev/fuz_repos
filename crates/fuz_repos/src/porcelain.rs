@@ -518,6 +518,11 @@ pub struct ConfigFacts {
     /// Whether `core.sshCommand` is set anywhere, so fetch leaves SSH alone.
     pub ssh_command: bool,
     pub branches: BTreeMap<String, BranchConfig>,
+    /// The last `remote.origin.tagOpt` git acts on, `--tags` or
+    /// `--no-tags` (git ignores any other value): either one keeps sync's
+    /// fetch from following tags (`probe`'s `follows_tags`). Unset is git's
+    /// default, auto-follow.
+    pub origin_tag_opt: Option<String>,
     /// The URL a fetch from `origin` reaches, as git resolves it: `git
     /// ls-remote --get-url origin`, the first URL with `insteadOf` applied.
     /// Not parsed here: the probe reads it, when origin has a URL, for an
@@ -639,6 +644,11 @@ impl ConfigFacts {
                     }),
                     "partialclonefilter" => facts.partial_filter = value.map(str::to_owned),
                     "fetch" => facts.origin_fetch.extend(value.map(config_value)),
+                    "tagopt" => {
+                        if let Some(v @ ("--tags" | "--no-tags")) = value {
+                            facts.origin_tag_opt = Some(v.to_owned());
+                        }
+                    }
                     _ => {}
                 }
             }

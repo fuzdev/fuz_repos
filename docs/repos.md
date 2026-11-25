@@ -219,7 +219,20 @@ exit `2`.
 ## Fetching
 
 `status --fetch` fetches owned entries that aren't pinned (and the references a
-run refreshes) from origin before probing; `sync` and `push` run the same fetch first.
+run refreshes) from origin before probing; `sync` and `push` run the same fetch first,
+`sync`'s following tags (below).
+
+**Tags.** `sync`'s fetch of an owned entry, not pinned and not shallow,
+follows tags as a plain `git fetch` does: it creates each tag origin has on a
+commit the repo then holds that no local tag of the name exists for — the
+release tags a `gro publish` on another machine pushed. It never moves a
+local tag (one that differs from origin's stays as it is, unreported) and
+never deletes one, whatever `fetch.pruneTags` says. A repo whose
+`remote.origin.tagOpt` is set gets none: `--no-tags` asks for none, and
+`--tags` would fetch every tag and fail the whole fetch on one that differs
+locally. The sync report's `tags` names those it created, the text summary
+counts them (`tag app +2`, named under `--verbose`). `status --fetch` and
+`push` fetch no tags, and third-party references get none.
 
 **Failures.** Each failed fetch gets a kind (`ref_gone`, `unreachable`,
 `repo_not_found`, `timed_out`, …, else `failed` with git's line).
@@ -230,7 +243,8 @@ leaked, printed first as `visibility`.
 
 **Confinement.** The fetch writes remote-tracking refs, the objects behind
 them, `FETCH_HEAD`, and a shallow boundary, and nothing else — never a tag, a
-submodule, or a commit-graph — whatever the repo's config says; an entry
+submodule, or a commit-graph — whatever the repo's config says, except the
+tags `sync`'s fetch follows; an entry
 whose refspecs could write outside `refs/remotes/origin/`, or another
 remote's into it, isn't fetched, and
 neither is an owned one whose fetch wouldn't reach the registry's repo as git
@@ -654,8 +668,8 @@ dir.
 each allowed that transport alone; on the entry's `branch` (`--branch`, else
 the remote's default), `--depth 1` when `shallow`, cone-mode `sparse` with
 `--filter=blob:none`, with `--no-tags` and no submodules or hooks — the
-`tagOpt` that records is then unset, so the user's own `git fetch` there
-follows tags as in any clone. A `sparse` path is checked at parse: plain
+`tagOpt` that records is then unset, so the next `sync`'s fetch (and the
+user's own `git fetch`) there follows tags as in any clone. A `sparse` path is checked at parse: plain
 relative directory names, no globs.
 
 **Placement.** The clone is made in a temp dir beside the entry's

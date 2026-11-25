@@ -1219,6 +1219,7 @@ pub fn sync_report_doc() -> SyncReport {
             let sync = EntrySync {
                 key: e.key.clone(),
                 fetch: FetchOutcome::Fetched,
+                tags: vec![],
                 clone: None,
                 branches,
             };
@@ -1254,12 +1255,14 @@ pub fn sync_report_doc() -> SyncReport {
     let sync = |key: &str, fetch, branches| EntrySync {
         key: key.into(),
         fetch,
+        tags: vec![],
         clone: None,
         branches,
     };
     let cloned = |key: &str, clone| EntrySync {
         key: key.into(),
         fetch: FetchOutcome::NotFetched,
+        tags: vec![],
         clone: Some(clone),
         branches: vec![],
     };
@@ -1334,6 +1337,8 @@ pub fn sync_report_doc() -> SyncReport {
         ),
         sync("broken", FetchOutcome::Fetched, vec![]),
     ];
+    // tags its fetch followed from origin
+    synced[2].tags = vec!["v0.4.0".into(), "v0.5.0".into()];
     synced.extend(rebase_syncs);
     SyncReport::new(status, synced)
 }

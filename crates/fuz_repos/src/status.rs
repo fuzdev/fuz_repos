@@ -25,11 +25,9 @@ use crate::classify::{
 use crate::discover::{Locate, Workspace, resolve_checkout, resolve_targets};
 use crate::error::{self, Error};
 use crate::paths::same_path;
-use crate::probe::{ProbeContext, ProbeRun, Probed, RepoFacts, RepoFetches, probe};
+use crate::probe::{FetchResult, ProbeContext, ProbeRun, Probed, RepoFacts, RepoFetches, probe};
 use crate::registry::{Entry, RegistryDirs};
-use crate::remote::{
-    RemoteFailure, VisibilityCheck, is_declared_private, read_anonymously, visibility_url,
-};
+use crate::remote::{VisibilityCheck, is_declared_private, read_anonymously, visibility_url};
 use crate::report::{EntryStatus, Sessions, StatusReport, UnregisteredClone};
 use crate::scan::{Scan, scan_unregistered};
 use crate::sessions::{LiveSessions, SessionsSource, read_live_sessions};
@@ -353,6 +351,7 @@ pub fn status(
             root,
             registry_dirs,
             fetch: opts.fetch,
+            follow_tags: false,
             refresh: opts.refresh,
             jobs: opts.jobs,
             visibility_base: opts.visibility_base,
@@ -376,6 +375,9 @@ pub(crate) struct Survey<'a> {
     /// The whole registry's dirs, whatever the entries.
     pub registry_dirs: &'a RegistryDirs,
     pub fetch: bool,
+    /// Sync's fetch follows tags (`ProbeContext::follow_tags`); status's
+    /// and push's don't.
+    pub follow_tags: bool,
     pub refresh: Refresh,
     pub jobs: usize,
     pub visibility_base: Option<&'a str>,
@@ -403,6 +405,7 @@ pub(crate) fn probe_and_assess<L: Borrow<LiveSessions>>(
             root: s.root,
             registry_dirs: s.registry_dirs,
             fetch: s.fetch,
+            follow_tags: s.follow_tags,
             refresh: s.refresh,
             fetches: &fetches,
         },
@@ -524,7 +527,7 @@ pub(crate) struct Assessed {
     /// Each entry's facts, when its repo was probed whole.
     pub facts: Vec<Option<RepoFacts>>,
     /// Each entry's fetch: `None` when none was attempted.
-    pub fetches: Vec<Option<Result<(), RemoteFailure>>>,
+    pub fetches: Vec<Option<FetchResult>>,
     /// Each entry's checkouts, which busy detection scopes sessions to.
     pub checkouts: Vec<EntryCheckouts>,
 }

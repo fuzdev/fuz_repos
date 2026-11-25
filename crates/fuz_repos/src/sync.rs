@@ -7,8 +7,11 @@
 //! leave.
 //!
 //! **The pipeline.** Sync is `status --fetch` (the same probe pool, the same
-//! hardened fetch writing remote-tracking refs alone, the same visibility
-//! checks) and then acts:
+//! hardened fetch writing remote-tracking refs, the same visibility checks)
+//! and then acts. Its fetch alone also follows tags: an owned entry's
+//! creates the tags origin has on commits the repo holds that are missing
+//! locally, never moving or deleting one (`probe`'s `follows_tags`), and
+//! each entry's outcome names them (`EntrySync::tags`). Step by step:
 //!
 //! 1. Probe every entry, fetching the ones `status --fetch` fetches first:
 //!    owned and not pinned, with an `origin` URL whose fetch, as git
@@ -272,7 +275,7 @@
 //! rebase's replay runs none, since one that merges a path settles a
 //! conflict, which the tool never does.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::time::{Duration, Instant};
 
@@ -284,9 +287,8 @@ use crate::clone::{CLONE_TIMEOUT, Cloner};
 use crate::discover::{Locate, Workspace, resolve_targets};
 use crate::error;
 use crate::porcelain::RefFacts;
-use crate::probe::RepoFacts;
+use crate::probe::{FetchResult, RepoFacts};
 use crate::registry::{Entry, RegistryDirs};
-use crate::remote::RemoteFailure;
 use crate::report::{
     BranchOutcome, BranchSync, BranchSyncHold, CloneOutcome, EntryStatus, EntrySync, FetchOutcome,
     PushOutcome, RebasePush, RebaseRefusal, Rebased, Sessions, SyncReport, UnregisteredClone,
@@ -449,6 +451,7 @@ pub fn sync(
             root,
             registry_dirs,
             fetch: true,
+            follow_tags: true,
             refresh: opts.refresh,
             jobs: opts.jobs,
             visibility_base: opts.visibility_base,
@@ -502,14 +505,26 @@ pub fn sync(
             }
         }
     }
+    // a repo's tags are its first entry's: entries sharing it share its fetch
+    let mut tagged_repos: HashSet<&Path> = HashSet::new();
     let outcomes = assessed
         .entries
         .iter()
-        .zip(&assessed.fetches)
+        .zip(assessed.fetches.iter().zip(&assessed.facts))
         .zip(branches.into_iter().zip(cloned))
-        .map(|((e, fetch), (branches, cloned))| EntrySync {
+        .map(|((e, (fetch, facts)), (branches, cloned))| EntrySync {
             key: e.key.clone(),
             fetch: fetch_outcome(fetch.as_ref()),
+            tags: match fetch {
+                Some(Ok(tags))
+                    if facts
+                        .as_ref()
+                        .is_none_or(|f| tagged_repos.insert(&f.repo_key)) =>
+                {
+                    tags.clone()
+                }
+                _ => Vec::new(),
+            },
             clone: e.clone.as_ref().map(|verdict| match verdict {
                 CloneVerdict::Held { by, .. } => CloneOutcome::Held { by: (*by).into() },
                 // never a guess that it was cloned
@@ -537,10 +552,10 @@ enum Acted {
 }
 
 /// An entry's fetch as an outcome: `None` when none was attempted.
-pub(crate) fn fetch_outcome(fetch: Option<&Result<(), RemoteFailure>>) -> FetchOutcome {
+pub(crate) fn fetch_outcome(fetch: Option<&FetchResult>) -> FetchOutcome {
     match fetch {
         None => FetchOutcome::NotFetched,
-        Some(Ok(())) => FetchOutcome::Fetched,
+        Some(Ok(_)) => FetchOutcome::Fetched,
         Some(Err(failure)) => FetchOutcome::Failed {
             failure: failure.clone(),
         },

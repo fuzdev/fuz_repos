@@ -6,6 +6,7 @@ use crate::classify::lazy_transport;
 use crate::porcelain::{self, ConfigFacts};
 use crate::probe::test_facts;
 use crate::registry::RepoUrl;
+use crate::remote::RemoteFailure;
 use crate::state::Head;
 
 #[test]

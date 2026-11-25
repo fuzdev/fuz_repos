@@ -5,7 +5,9 @@
 //! remote-tracking refs alone, whatever the repo's config asks (`FETCH_ARGS`;
 //! a refspec no flag can confine — origin's writing outside
 //! `refs/remotes/origin/`, or another remote's writing inside it — isn't
-//! fetched).
+//! fetched) — except under `sync`, whose fetch of an owned entry also
+//! creates the tags git's auto-follow brings (`follows_tags`), never moving
+//! or deleting one.
 //!
 //! The files it reads itself that git reads too — a worktree's `.git`, a
 //! worktree git dir's `HEAD` and `gitdir` — are read as git reads them
@@ -47,6 +49,9 @@ pub struct ProbeContext<'a> {
     pub registry_dirs: &'a RegistryDirs,
     /// Fetch from `origin` before probing the entries `fetches` names.
     pub fetch: bool,
+    /// `sync`'s fetch: also create the tags git's auto-follow brings, in
+    /// the entries `follows_tags` names.
+    pub follow_tags: bool,
     /// Which references the run refreshes: a third-party one it refreshes
     /// is fetched too.
     pub refresh: Refresh,
@@ -63,8 +68,9 @@ pub struct ProbeContext<'a> {
 #[derive(Debug, Default)]
 pub struct RepoFetches(Mutex<HashMap<PathBuf, Arc<Mutex<Option<FetchResult>>>>>);
 
-/// How a fetch went: `Err` says why it failed or was refused.
-type FetchResult = Result<(), RemoteFailure>;
+/// How a fetch went: `Ok` holds the tags it created (only a fetch that
+/// follows tags creates any), `Err` says why it failed or was refused.
+pub type FetchResult = Result<Vec<String>, RemoteFailure>;
 
 impl RepoFetches {
     /// `fetch`'s outcome for `repo`: run by the first caller, while any
@@ -391,6 +397,20 @@ fn fetches(entry: &Entry, refresh: Refresh, config: &ConfigFacts) -> bool {
         )
 }
 
+/// Whether a fetch of `entry` follows tags: under `follow_tags` (sync's
+/// fetch), an owned entry not pinned and not shallow, whose config leaves
+/// `remote.origin.tagOpt` to git's default — `--no-tags` is the user's
+/// asking for none, and `--tags` would fetch every tag and fail the whole
+/// fetch on one that differs locally.
+const fn follows_tags(
+    entry: &Entry,
+    config: &ConfigFacts,
+    shallow: bool,
+    follow_tags: bool,
+) -> bool {
+    follow_tags && syncs_owned(entry) && !shallow && config.origin_tag_opt.is_none()
+}
+
 /// Whether the entry is owned and not pinned: fetched on every fetching
 /// run, and the only kind sync may push.
 const fn syncs_owned(entry: &Entry) -> bool {
@@ -423,7 +443,7 @@ pub fn probe(entry: &Entry, cx: ProbeContext<'_>) -> ProbeRun {
 #[derive(Debug, Default)]
 struct Recorded {
     config: Option<ConfigFacts>,
-    fetch: Option<Result<(), RemoteFailure>>,
+    fetch: Option<FetchResult>,
     fetch_time: Duration,
     layout: Option<Layout>,
 }
@@ -719,6 +739,13 @@ fn probe_config(
 /// `repo_key`), confined to remote-tracking refs (`FETCH_ARGS`), `--depth
 /// 1` when `shallow`.
 ///
+/// When it follows tags (`follows_tags`), git's auto-follow replaces
+/// `--no-tags` (`fetch_args`): it creates each tag origin has on an
+/// object the repo then holds and that no local tag of the name exists
+/// for. It never updates a local tag, one that differs from origin's
+/// included, which it leaves as it is and doesn't report; `--no-prune-tags`
+/// still keeps it from deleting one. `--porcelain` says which it created.
+///
 /// A refspec writing outside `refs/remotes/origin/`, or another remote's
 /// writing inside it, where no flag reaches, is refused: not fetched at
 /// all.
@@ -730,7 +757,8 @@ fn fetch_origin(
     cx: ProbeContext<'_>,
 ) -> FetchResult {
     let dir = Path::new(&dirs.path);
-    let mut args = FETCH_ARGS.to_vec();
+    let tags = follows_tags(entry, config, shallow, cx.follow_tags);
+    let mut args = fetch_args(tags);
     if shallow {
         args.extend(["--depth", "1"]);
     }
@@ -764,7 +792,7 @@ fn fetch_origin(
         })
         .or_else(|| legacy_remote_refusal(&dirs.common_dir));
     let fetch = || {
-        cx.git.output(dir, &args, net).map(drop).map_err(|e| {
+        let out = cx.git.output(dir, &args, net).map_err(|e| {
             RemoteFailure::from_git_error(
                 e,
                 RefspecContext {
@@ -772,7 +800,8 @@ fn fetch_origin(
                     branch: entry.branch.as_deref(),
                 },
             )
-        })
+        })?;
+        Ok(if tags { created_tags(&out) } else { Vec::new() })
     };
     cx.fetches
         .once(dirs.repo_key.clone(), || refused.map_or_else(fetch, Err))
@@ -1033,6 +1062,37 @@ const FETCH_ARGS: [&str; 9] = [
     // `fetch.writeCommitGraph` writes `objects/info/commit-graph(s)`
     "--no-write-commit-graph",
 ];
+
+/// `FETCH_ARGS`, or for a fetch that follows tags (`follows_tags`, sync's)
+/// the same with git's tag auto-follow in place of `--no-tags` and
+/// `--porcelain`, which names the tags it creates, in place of `--quiet`,
+/// which would silence it.
+fn fetch_args(follow_tags: bool) -> Vec<&'static str> {
+    FETCH_ARGS
+        .iter()
+        .filter_map(|&arg| match (follow_tags, arg) {
+            (true, "--no-tags") => None,
+            (true, "--quiet") => Some("--porcelain"),
+            _ => Some(arg),
+        })
+        .collect()
+}
+
+/// The tags a `fetch --porcelain` created, by name, in its order: each
+/// `* <old> <new> refs/tags/<name>` line. Auto-follow never updates or
+/// deletes a tag, and the rest is remote-tracking refs.
+fn created_tags(out: &[u8]) -> Vec<String> {
+    String::from_utf8_lossy(out)
+        .lines()
+        .filter_map(|line| {
+            let mut fields = line.split(' ');
+            match (fields.next(), fields.next_back()) {
+                (Some("*"), Some(refname)) => refname.strip_prefix("refs/tags/").map(str::to_owned),
+                _ => None,
+            }
+        })
+        .collect()
+}
 
 /// Whether a fetch refspec writes a ref outside `refs/remotes/origin/`.
 ///

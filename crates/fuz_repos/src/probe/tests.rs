@@ -556,6 +556,7 @@ purpose = "a .git git can't use"
         root: tmp.path(),
         registry_dirs: &registry_dirs,
         fetch: false,
+        follow_tags: false,
         refresh: Refresh::Unasked,
         fetches: &RepoFetches::default(),
     };

@@ -30,11 +30,11 @@
 //!   fetching only the blobs those need, so the whole tree is never
 //!   materialized. Both calls may fetch missing objects on demand
 //!   (`CallOptions::lazy_fetch`), from origin, over the same transport.
-//! - **`--no-tags`**: as the tool's fetches bring none, the clone brings
-//!   none. Git records that as `remote.origin.tagOpt=--no-tags`, which the
-//!   clone then unsets, in the temp dir before it's placed: the tool's own
-//!   fetches pass `--no-tags` anyway, and the user's `git fetch` there
-//!   follows tags as it would in any clone made by hand (a publish's
+//! - **`--no-tags`**: the clone brings none; `sync`'s next fetch of an
+//!   owned entry creates them. Git records that as
+//!   `remote.origin.tagOpt=--no-tags`, which the clone then unsets, in the
+//!   temp dir before it's placed, so that fetch, and the user's `git
+//!   fetch` there, follows tags as in any clone made by hand (a publish's
 //!   tags, a pin aligned to a tag).
 //! - **Never submodules** (`--no-recurse-submodules`), and no bundle URIs a
 //!   server advertises (`transfer.bundleURI=false`, for this call only).
@@ -256,6 +256,7 @@ impl Cloner<'_> {
                 root: self.root,
                 registry_dirs: self.registry_dirs,
                 fetch: false,
+                follow_tags: false,
                 refresh: Refresh::Unasked,
                 fetches: &fetches,
             },

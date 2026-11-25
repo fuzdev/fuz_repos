@@ -436,6 +436,15 @@ impl SyncReport {
 pub struct EntrySync {
     pub key: String,
     pub fetch: FetchOutcome,
+    /// The tags sync's fetch created, by name, in git's order: those origin
+    /// has on an object the repo then holds, with no local tag of the name
+    /// (git's auto-follow). Sync's fetch follows tags for an owned entry
+    /// not pinned and not shallow, unless its `remote.origin.tagOpt` says
+    /// otherwise; it never updates or deletes a tag, so a local tag that
+    /// differs from origin's stays as it is, unreported. Empty when it
+    /// created none, followed none, or failed. Entries sharing a repo
+    /// share its one fetch, whose tags the first of them lists.
+    pub tags: Vec<String>,
     /// What sync did about a missing dir: `Some` exactly when the status
     /// entry has a `clone` verdict.
     pub clone: Option<CloneOutcome>,

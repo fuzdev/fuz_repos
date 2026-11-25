@@ -718,6 +718,7 @@ fn clones_read_as_what_sync_would_do_and_did() {
     let outcome = |key: &str, clone| EntrySync {
         key: key.into(),
         fetch: FetchOutcome::NotFetched,
+        tags: vec![],
         clone: Some(clone),
         branches: vec![],
     };
@@ -911,6 +912,7 @@ fn a_refresh_reads_as_what_sync_would_do_and_did() {
     let sync = |key: &str, fetch, branches| EntrySync {
         key: key.into(),
         fetch,
+        tags: vec![],
         clone: None,
         branches,
     };
@@ -958,6 +960,17 @@ fn a_refresh_reads_as_what_sync_would_do_and_did() {
         ],
         "{text}"
     );
+
+    // the tags a fetch created: counted, named under `--verbose`
+    let mut tagged = synced;
+    tagged.entries[0].tags = vec!["v1".into(), "v2".into()];
+    for (verbose, want) in [
+        (false, "              tag lib +2"),
+        (true, "              tag lib +2 (v1 v2)"),
+    ] {
+        let text = render_sync_summary(&tagged, VIEW, verbose);
+        assert!(text.lines().any(|l| l == want), "{text}");
+    }
 }
 
 #[test]
@@ -3266,6 +3279,7 @@ fn rebases_read_as_what_sync_would_do_and_did() {
             .map(|(key, outcome)| EntrySync {
                 key: key.into(),
                 fetch: FetchOutcome::Fetched,
+                tags: vec![],
                 clone: None,
                 branches: vec![BranchSync {
                     name: "main".into(),

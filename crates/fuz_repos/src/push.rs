@@ -307,6 +307,8 @@ pub fn push(
             root,
             registry_dirs,
             fetch: true,
+            // one branch's push: tags are sync's
+            follow_tags: false,
             // owned entries, never pinned: nothing to refresh
             refresh: Refresh::Unasked,
             jobs: opts.jobs,

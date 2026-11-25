@@ -63,8 +63,8 @@ diverged.
 | Writes | Tier | Commands |
 | --- | --- | --- |
 | nothing in git | **observe** | `repos status` (local refs), `repos status --brief`; `gitops_analyze`, `gitops_plan`, `gitops_validate`, `gitops_sync --check`, `gitops_run` with read-only commands |
-| remote-tracking refs only, plus the objects, `FETCH_HEAD`, and shallow boundary a fetch writes | **observe** (refreshed) | `repos status --fetch`; the fetch that starts `repos sync`, `repos push`, and `gitops_release` (without `--wetrun`, all it writes), and `gitops_sync`'s fetch before it writes its host's site data |
-| local branches, working trees, new clones, and the commit objects a rebase replays | **converge** | `repos sync` (fast-forwards, shallow moves, a diverged registry branch's local-only commits replayed onto its fetched upstream, clones of missing entries, references refreshed when named or under `--references`); `repos push` only rebases, and only the branch checked out at a target when it diverged and that checkout is clean; it never fast-forwards, moves, or clones |
+| remote-tracking refs only, plus the objects, `FETCH_HEAD`, and shallow boundary a fetch writes | **observe** (refreshed) | `repos status --fetch`; the fetch that starts `repos push` and `gitops_release` (without `--wetrun`, all it writes), and `gitops_sync`'s fetch before it writes its host's site data |
+| local branches, working trees, new clones, the commit objects a rebase replays, and tags origin has that are missing locally | **converge** | `repos sync` (its fetch, which also creates the missing tags git's auto-follow brings and never moves or deletes one; fast-forwards, shallow moves, a diverged registry branch's local-only commits replayed onto its fetched upstream, clones of missing entries, references refreshed when named or under `--references`); `repos push` only rebases, and only the branch checked out at a target when it diverged and that checkout is clean; it never fast-forwards, moves, or clones |
 | local commits: dependency-range rewrites and their auto-changesets | **rewrite** | `gitops_release --wetrun`, in ready repos only: one commit per dependent of `package.json` and its `.changeset/dependency-updates.md`, on the branch it's on |
 | remote branches, under policy | **gateway** | `repos push`, and the push step of `repos sync` (a rebased branch's included, under either): fast-forwards only, under a lease, to the registry's SSH URL, owned entries only, no tags or force; a new remote branch is `repos push --new-branch`, the user's |
 | releases: npm, git commits and tags, deploys | **publish** | `gro publish` and `gro deploy`, run by the user in the repos `gitops_release` names — the user's |
@@ -117,7 +117,8 @@ and `busy.rs` and `sessions.rs` (busy detection) says how):
   never need modelling. Any other diverged branch stops and reports
 - never creates a commit of new content, a tag, or a changeset: a rebase's
   replayed commits are new objects with the changes, messages, authors, and
-  author dates of the ones they replace
+  author dates of the ones they replace, and the tags `repos sync`'s fetch
+  creates are origin's, missing locally — it never moves or deletes a tag
 - never force-pushes: a push is a fast-forward of exactly the tip the fetch
   saw, under a lease, and sends no tags or push options; a remote branch is
   created only by the user's `repos push --new-branch`, refused in an agent's

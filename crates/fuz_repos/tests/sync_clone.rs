@@ -207,13 +207,14 @@ fn an_owned_entry_is_cloned_over_ssh_on_its_branch() {
     // a clone writes no `FETCH_HEAD`: its own reflog entry dates it
     assert!(!app.join(".git/FETCH_HEAD").exists());
     assert_eq!(e.fetched_at, Some(ws.clone_reflog_time(&app)));
-    // a second sync has nothing to clone, and fetches it instead — no tags
+    // no tags, as no fetch but sync's brings any
+    assert!(!ws.has_ref(&app, "refs/tags/v1"));
+    // a second sync has nothing to clone, and fetches it instead, following
+    // tags: no `tagOpt` is left to stop it, nor the user's own fetch
     let run = ws.sync();
     assert_eq!(outcomes(&run, "app").clone, None);
     assert_eq!(outcomes(&run, "app").fetch, FetchOutcome::Fetched);
-    assert!(!ws.has_ref(&app, "refs/tags/v1"));
-    // the user's own fetch follows tags, as in any clone
-    ws.git(&app, &["fetch", "-q"]);
+    assert_eq!(outcomes(&run, "app").tags, ["v1"]);
     assert!(ws.has_ref(&app, "refs/tags/v1"));
 }
 

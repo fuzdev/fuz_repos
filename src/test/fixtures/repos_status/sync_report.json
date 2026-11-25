@@ -1,5 +1,5 @@
 {
-	"version": 15,
+	"version": 16,
 	"status": {
 		"version": 21,
 		"workspace": "/home/me/dev",
@@ -1978,6 +1978,7 @@
 			"fetch": {
 				"kind": "fetched"
 			},
+			"tags": [],
 			"clone": null,
 			"branches": [
 				{
@@ -2132,6 +2133,7 @@
 			"fetch": {
 				"kind": "fetched"
 			},
+			"tags": [],
 			"clone": null,
 			"branches": [
 				{
@@ -2153,6 +2155,10 @@
 			"fetch": {
 				"kind": "fetched"
 			},
+			"tags": [
+				"v0.4.0",
+				"v0.5.0"
+			],
 			"clone": null,
 			"branches": [
 				{
@@ -2177,6 +2183,7 @@
 					"message": "git@github.com: Permission denied (publickey)."
 				}
 			},
+			"tags": [],
 			"clone": null,
 			"branches": [
 				{
@@ -2196,6 +2203,7 @@
 			"fetch": {
 				"kind": "fetched"
 			},
+			"tags": [],
 			"clone": null,
 			"branches": [
 				{
@@ -2212,6 +2220,7 @@
 			"fetch": {
 				"kind": "not_fetched"
 			},
+			"tags": [],
 			"clone": null,
 			"branches": [
 				{
@@ -2231,6 +2240,7 @@
 			"fetch": {
 				"kind": "fetched"
 			},
+			"tags": [],
 			"clone": null,
 			"branches": [
 				{
@@ -2252,6 +2262,7 @@
 			"fetch": {
 				"kind": "not_fetched"
 			},
+			"tags": [],
 			"clone": {
 				"kind": "cloned",
 				"branch": "main",
@@ -2264,6 +2275,7 @@
 			"fetch": {
 				"kind": "not_fetched"
 			},
+			"tags": [],
 			"clone": {
 				"kind": "held",
 				"by": "unprobed_worktree"
@@ -2275,6 +2287,7 @@
 			"fetch": {
 				"kind": "not_fetched"
 			},
+			"tags": [],
 			"clone": {
 				"kind": "held",
 				"by": "entry"
@@ -2286,6 +2299,7 @@
 			"fetch": {
 				"kind": "not_fetched"
 			},
+			"tags": [],
 			"clone": {
 				"kind": "held",
 				"by": "entry"
@@ -2297,6 +2311,7 @@
 			"fetch": {
 				"kind": "not_fetched"
 			},
+			"tags": [],
 			"clone": {
 				"kind": "held",
 				"by": "changed"
@@ -2308,6 +2323,7 @@
 			"fetch": {
 				"kind": "not_fetched"
 			},
+			"tags": [],
 			"clone": {
 				"kind": "clone_failed",
 				"failure": {
@@ -2322,6 +2338,7 @@
 			"fetch": {
 				"kind": "not_fetched"
 			},
+			"tags": [],
 			"clone": {
 				"kind": "failed",
 				"message": "can't move the clone into /home/me/dev/dom: Permission denied (os error 13)"
@@ -2333,6 +2350,7 @@
 			"fetch": {
 				"kind": "not_fetched"
 			},
+			"tags": [],
 			"clone": {
 				"kind": "held",
 				"by": "busy"
@@ -2344,6 +2362,7 @@
 			"fetch": {
 				"kind": "fetched"
 			},
+			"tags": [],
 			"clone": null,
 			"branches": []
 		},
@@ -2352,6 +2371,7 @@
 			"fetch": {
 				"kind": "fetched"
 			},
+			"tags": [],
 			"clone": null,
 			"branches": [
 				{
@@ -2372,6 +2392,7 @@
 			"fetch": {
 				"kind": "fetched"
 			},
+			"tags": [],
 			"clone": null,
 			"branches": [
 				{
@@ -2392,6 +2413,7 @@
 			"fetch": {
 				"kind": "fetched"
 			},
+			"tags": [],
 			"clone": null,
 			"branches": [
 				{
@@ -2413,6 +2435,7 @@
 			"fetch": {
 				"kind": "fetched"
 			},
+			"tags": [],
 			"clone": null,
 			"branches": [
 				{
@@ -2438,6 +2461,7 @@
 			"fetch": {
 				"kind": "fetched"
 			},
+			"tags": [],
 			"clone": null,
 			"branches": [
 				{
@@ -2459,6 +2483,7 @@
 			"fetch": {
 				"kind": "fetched"
 			},
+			"tags": [],
 			"clone": null,
 			"branches": [
 				{
@@ -2476,6 +2501,7 @@
 			"fetch": {
 				"kind": "fetched"
 			},
+			"tags": [],
 			"clone": null,
 			"branches": [
 				{

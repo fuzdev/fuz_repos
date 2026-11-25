@@ -61,6 +61,7 @@ fn sync_json_is_the_versioned_outcome_report() {
         serde_json::json!({
             "key": "gone",
             "fetch": {"kind": "not_fetched"},
+            "tags": [],
             "clone": {"kind": "cloned", "branch": "main", "head": gone_tip},
             "branches": [],
         })
